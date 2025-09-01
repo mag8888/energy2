@@ -16,7 +16,9 @@ import {
 import {
   Email as EmailIcon,
   Person as PersonIcon,
-  Lock as LockIcon
+  Lock as LockIcon,
+  CheckBox as CheckBoxIcon,
+  CheckBoxOutlineBlank as CheckBoxOutlineBlankIcon
 } from '@mui/icons-material';
 
 const Registration = ({ onRegister }) => {
@@ -26,6 +28,9 @@ const Registration = ({ onRegister }) => {
     email: '',
     password: ''
   });
+  
+  // Состояние "Запомнить меня"
+  const [rememberMe, setRememberMe] = useState(false);
   
   // Состояние UI
   const [currentStep, setCurrentStep] = useState(0);
@@ -42,6 +47,34 @@ const Registration = ({ onRegister }) => {
   useEffect(() => {
     console.log('🔌 [Registration] Component mounted, connecting to socket...');
     connectSocket().catch(console.error);
+    
+    // Проверяем сохраненные данные для автологина
+    const savedCredentials = localStorage.getItem('energy_of_money_remember_me');
+    if (savedCredentials) {
+      try {
+        const credentials = JSON.parse(savedCredentials);
+        console.log('🔐 [Registration] Найдены сохраненные данные для автологина:', credentials.email);
+        
+        // Заполняем форму сохраненными данными
+        setFormData(prev => ({
+          ...prev,
+          email: credentials.email || '',
+          password: credentials.password || ''
+        }));
+        setRememberMe(true);
+        
+        // Автоматически пытаемся войти
+        setTimeout(() => {
+          if (credentials.email && credentials.password) {
+            console.log('🔐 [Registration] Выполняем автоматический вход...');
+            handleAutoLogin(credentials.email, credentials.password);
+          }
+        }, 1000);
+      } catch (error) {
+        console.error('❌ [Registration] Ошибка парсинга сохраненных данных:', error);
+        localStorage.removeItem('energy_of_money_remember_me');
+      }
+    }
   }, []);
 
   // Очистка ошибок при изменении шага
@@ -71,6 +104,55 @@ const Registration = ({ onRegister }) => {
     return password.length >= 6;
   }, []);
 
+  // Функция автоматического входа
+  const handleAutoLogin = useCallback(async (email, password) => {
+    console.log('🔐 [Registration] Выполняем автоматический вход для:', email);
+    setIsLoading(true);
+    setError('');
+
+    try {
+      const socket = await connectSocket();
+      
+      // Проверяем существование пользователя
+      socket.emit('checkUserExists', email, (response) => {
+        if (response.exists) {
+          console.log('🔐 [Registration] Пользователь найден, выполняем вход...');
+          
+          // Выполняем вход
+          socket.emit('authenticateUser', '', email, password, (authResponse) => {
+            if (authResponse.success) {
+              console.log('✅ [Registration] Автоматический вход успешен:', authResponse.userData);
+              
+              // Сохраняем данные если включено "Запомнить меня"
+              if (rememberMe) {
+                const credentials = { email, password };
+                localStorage.setItem('energy_of_money_remember_me', JSON.stringify(credentials));
+                console.log('💾 [Registration] Данные для автологина сохранены');
+              }
+              
+              onRegister(authResponse.userData);
+            } else {
+              console.log('❌ [Registration] Автоматический вход не удался:', authResponse.error);
+              setError('Автоматический вход не удался. Введите данные вручную.');
+              // Удаляем неверные данные
+              localStorage.removeItem('energy_of_money_remember_me');
+            }
+            setIsLoading(false);
+          });
+        } else {
+          console.log('❌ [Registration] Пользователь не найден для автологина');
+          setError('Сохраненные данные устарели. Введите данные вручную.');
+          localStorage.removeItem('energy_of_money_remember_me');
+          setIsLoading(false);
+        }
+      });
+    } catch (error) {
+      console.error('❌ [Registration] Ошибка автоматического входа:', error);
+      setError('Ошибка автоматического входа. Попробуйте войти вручную.');
+      setIsLoading(false);
+    }
+  }, [rememberMe, onRegister]);
+
   // Проверка существования пользователя
   const checkUserExists = useCallback(async () => {
     if (!validateEmail(formData.email)) {
@@ -82,22 +164,24 @@ const Registration = ({ onRegister }) => {
     setError('');
 
     try {
-      // Эмулируем проверку пользователя (в реальном приложении здесь будет API вызов)
-      const userExists = Math.random() > 0.5; // Временно для демонстрации
+      const socket = await connectSocket();
       
-      if (userExists) {
-        setIsExistingUser(true);
-        setCurrentStep(1); // Переходим к вводу username
-        console.log('🔍 [Registration] User exists, proceeding to username step');
-      } else {
-        setIsExistingUser(false);
-        setCurrentStep(1); // Переходим к вводу username для нового пользователя
-        console.log('🔍 [Registration] New user, proceeding to username step');
-      }
+      // Проверяем существование пользователя через WebSocket
+      socket.emit('checkUserExists', formData.email, (response) => {
+        if (response.exists) {
+          setIsExistingUser(true);
+          setCurrentStep(1); // Переходим к вводу username
+          console.log('🔍 [Registration] User exists, proceeding to username step');
+        } else {
+          setIsExistingUser(false);
+          setCurrentStep(1); // Переходим к вводу username для нового пользователя
+          console.log('🔍 [Registration] New user, proceeding to username step');
+        }
+        setIsLoading(false);
+      });
     } catch (error) {
       console.error('❌ [Registration] Error checking user:', error);
       setError('Ошибка при проверке пользователя. Попробуйте еще раз.');
-    } finally {
       setIsLoading(false);
     }
   }, [formData.email, validateEmail]);
@@ -113,64 +197,89 @@ const Registration = ({ onRegister }) => {
     setError('');
 
     try {
-      // Эмулируем проверку уникальности (в реальном приложении здесь будет API вызов)
-      const isUnique = Math.random() > 0.3; // Временно для демонстрации
+      const socket = await connectSocket();
       
-      if (isUnique) {
-        if (isExistingUser) {
-          // Существующий пользователь - переходим к вводу пароля
-          setCurrentStep(2);
-          console.log('✅ [Registration] Username confirmed for existing user');
+      // Проверяем уникальность username через WebSocket
+      socket.emit('checkUsernameUnique', formData.username, (response) => {
+        if (response.unique) {
+          if (isExistingUser) {
+            // Существующий пользователь - переходим к вводу пароля
+            setCurrentStep(2);
+            console.log('✅ [Registration] Username confirmed for existing user');
+          } else {
+            // Новый пользователь - переходим к вводу пароля
+            setCurrentStep(2);
+            console.log('✅ [Registration] Username is unique for new user');
+          }
         } else {
-          // Новый пользователь - переходим к вводу пароля
-          setCurrentStep(2);
-          console.log('✅ [Registration] Username is unique for new user');
+          setError('Пользователь с таким именем уже существует. Выберите другое имя.');
         }
-      } else {
-        setError('Пользователь с таким именем уже существует. Выберите другое имя.');
-      }
+        setIsLoading(false);
+      });
     } catch (error) {
       console.error('❌ [Registration] Error checking username:', error);
       setError('Ошибка при проверке имени. Попробуйте еще раз.');
-    } finally {
       setIsLoading(false);
     }
   }, [formData.username, validateUsername, isExistingUser]);
 
   // Финальная обработка формы
   const handleFinalSubmit = useCallback(async () => {
-    if (isExistingUser && !validatePassword(formData.password)) {
-      setError('Введите пароль');
-      return;
-    }
-
-    if (!isExistingUser && !validatePassword(formData.password)) {
-      setError('Пароль должен содержать минимум 6 символов');
-      return;
+    if (isExistingUser) {
+      // Для существующих пользователей проверяем только пароль
+      if (!validatePassword(formData.password)) {
+        setError('Пароль должен содержать минимум 6 символов');
+        return;
+      }
+    } else {
+      // Для новых пользователей проверяем username и пароль
+      if (!validateUsername(formData.username)) {
+        setError('Имя должно содержать минимум 2 символа');
+        return;
+      }
+      if (!validatePassword(formData.password)) {
+        setError('Пароль должен содержать минимум 6 символов');
+        return;
+      }
     }
 
     setIsLoading(true);
     setError('');
 
     try {
-      // Эмулируем регистрацию/вход (в реальном приложении здесь будет API вызов)
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      const socket = await connectSocket();
       
-      const userData = {
-        id: `user_${Date.now()}`,
-        username: formData.username,
-        email: formData.email
-      };
-
-      console.log('✅ [Registration] User authenticated:', userData);
-      onRegister(userData);
+      // Отправляем данные для аутентификации/регистрации через WebSocket
+      socket.emit('authenticateUser', formData.username, formData.email, formData.password, (response) => {
+        if (response.success) {
+          console.log('✅ [Registration] User authenticated:', response.userData);
+          
+          // Сохраняем данные если включено "Запомнить меня"
+          if (rememberMe) {
+            const credentials = { 
+              email: formData.email, 
+              password: formData.password 
+            };
+            localStorage.setItem('energy_of_money_remember_me', JSON.stringify(credentials));
+            console.log('💾 [Registration] Данные для автологина сохранены');
+          } else {
+            // Удаляем сохраненные данные если "Запомнить меня" отключено
+            localStorage.removeItem('energy_of_money_remember_me');
+            console.log('🗑️ [Registration] Данные для автологина удалены');
+          }
+          
+          onRegister(response.userData);
+        } else {
+          setError(response.error || 'Ошибка при аутентификации. Попробуйте еще раз.');
+        }
+        setIsLoading(false);
+      });
     } catch (error) {
       console.error('❌ [Registration] Error during authentication:', error);
       setError('Ошибка при аутентификации. Попробуйте еще раз.');
-    } finally {
       setIsLoading(false);
     }
-  }, [formData, validatePassword, isExistingUser, onRegister]);
+  }, [formData, validatePassword, validateUsername, isExistingUser, rememberMe, onRegister]);
 
   // Обработчик отправки формы
   const handleSubmit = useCallback((e) => {
@@ -182,7 +291,13 @@ const Registration = ({ onRegister }) => {
         checkUserExists();
         break;
       case 1:
-        checkUsernameUnique();
+        if (isExistingUser) {
+          // Для существующих пользователей - сразу финальная отправка
+          handleFinalSubmit();
+        } else {
+          // Для новых пользователей - проверка уникальности username
+          checkUsernameUnique();
+        }
         break;
       case 2:
         handleFinalSubmit();
@@ -190,7 +305,7 @@ const Registration = ({ onRegister }) => {
       default:
         console.error('❌ [Registration] Invalid step:', currentStep);
     }
-  }, [currentStep, checkUserExists, checkUsernameUnique, handleFinalSubmit]);
+  }, [currentStep, checkUserExists, checkUsernameUnique, handleFinalSubmit, isExistingUser]);
 
   // Обработчик сброса пароля
   const handleResetPassword = useCallback(async () => {
@@ -259,8 +374,14 @@ const Registration = ({ onRegister }) => {
           }
           break;
         case 1:
-          if (formData.username.trim() && !isLoading) {
-            checkUsernameUnique();
+          if (isExistingUser) {
+            if (formData.password && !isLoading) {
+              handleFinalSubmit();
+            }
+          } else {
+            if (formData.username.trim() && !isLoading) {
+              checkUsernameUnique();
+            }
           }
           break;
         case 2:
@@ -268,9 +389,11 @@ const Registration = ({ onRegister }) => {
             handleFinalSubmit();
           }
           break;
+        default:
+          break;
       }
     }
-  }, [currentStep, formData, isLoading, checkUserExists, checkUsernameUnique, handleFinalSubmit]);
+  }, [currentStep, formData, isLoading, checkUserExists, checkUsernameUnique, handleFinalSubmit, isExistingUser]);
 
   return (
     <Box
@@ -371,41 +494,103 @@ const Registration = ({ onRegister }) => {
             </Box>
           )}
 
-          {/* Шаг 1: Username */}
+          {/* Шаг 1: Username (для новых пользователей) или Password (для существующих) */}
           {currentStep === 1 && (
             <Box>
-              <TextField
-                fullWidth
-                label="Имя пользователя"
-                value={formData.username}
-                onChange={(e) => handleInputChange('username', e.target.value)}
-                onKeyPress={handleKeyPress}
-                placeholder="Введите ваше имя"
-                InputProps={{
-                  startAdornment: <PersonIcon sx={{ mr: 1, color: 'text.secondary' }} />
-                }}
-                sx={{ mb: 2 }}
-                disabled={isLoading}
-              />
-              
-              <Box sx={{ display: 'flex', gap: 2 }}>
-                <Button
-                  variant="outlined"
-                  onClick={goToPreviousStep}
-                  disabled={isLoading}
-                  sx={{ flex: 1 }}
-                >
-                  Назад
-                </Button>
-                <Button
-                  variant="contained"
-                  onClick={goToNextStep}
-                  disabled={isLoading || !formData.username.trim()}
-                  sx={{ flex: 1 }}
-                >
-                  {isLoading ? <CircularProgress size={24} /> : 'Продолжить'}
-                </Button>
-              </Box>
+              {!isExistingUser ? (
+                // Для новых пользователей - поле username
+                <>
+                  <TextField
+                    fullWidth
+                    label="Имя пользователя"
+                    value={formData.username}
+                    onChange={(e) => handleInputChange('username', e.target.value)}
+                    onKeyPress={handleKeyPress}
+                    placeholder="Введите ваше имя"
+                    InputProps={{
+                      startAdornment: <PersonIcon sx={{ mr: 1, color: 'text.secondary' }} />
+                    }}
+                    sx={{ mb: 2 }}
+                    disabled={isLoading}
+                  />
+                  
+                  <Box sx={{ display: 'flex', gap: 2 }}>
+                    <Button
+                      variant="outlined"
+                      onClick={goToPreviousStep}
+                      disabled={isLoading}
+                      sx={{ flex: 1 }}
+                    >
+                      Назад
+                    </Button>
+                    <Button
+                      variant="contained"
+                      onClick={goToNextStep}
+                      disabled={isLoading || !formData.username.trim()}
+                      sx={{ flex: 1 }}
+                    >
+                      {isLoading ? <CircularProgress size={24} /> : 'Продолжить'}
+                    </Button>
+                  </Box>
+                </>
+              ) : (
+                // Для существующих пользователей - поле password
+                <>
+                  <TextField
+                    fullWidth
+                    label="Пароль"
+                    type="password"
+                    value={formData.password}
+                    onChange={(e) => handleInputChange('password', e.target.value)}
+                    onKeyPress={handleKeyPress}
+                    placeholder="Введите пароль"
+                    InputProps={{
+                      startAdornment: <LockIcon sx={{ mr: 1, color: 'text.secondary' }} />
+                    }}
+                    sx={{ mb: 2 }}
+                    disabled={isLoading}
+                  />
+                  
+                  {/* Чекбокс "Запомнить меня" для существующих пользователей */}
+                  <Box sx={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    mb: 2,
+                    cursor: 'pointer',
+                    '&:hover': { opacity: 0.8 }
+                  }}
+                  onClick={() => setRememberMe(!rememberMe)}
+                  >
+                    {rememberMe ? (
+                      <CheckBoxIcon sx={{ color: '#667eea', mr: 1 }} />
+                    ) : (
+                      <CheckBoxOutlineBlankIcon sx={{ color: '#667eea', mr: 1 }} />
+                    )}
+                    <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                      Запомнить меня
+                    </Typography>
+                  </Box>
+                  
+                  <Box sx={{ display: 'flex', gap: 2 }}>
+                    <Button
+                      variant="outlined"
+                      onClick={goToPreviousStep}
+                      disabled={isLoading}
+                      sx={{ flex: 1 }}
+                    >
+                      Назад
+                    </Button>
+                    <Button
+                      variant="contained"
+                      type="submit"
+                      disabled={isLoading || !formData.password}
+                      sx={{ flex: 1 }}
+                    >
+                      {isLoading ? <CircularProgress size={24} /> : 'Войти'}
+                    </Button>
+                  </Box>
+                </>
+              )}
             </Box>
           )}
 
@@ -426,6 +611,28 @@ const Registration = ({ onRegister }) => {
                 sx={{ mb: 2 }}
                 disabled={isLoading}
               />
+              
+              {/* Чекбокс "Запомнить меня" (только для существующих пользователей) */}
+              {isExistingUser && (
+                <Box sx={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  mb: 2,
+                  cursor: 'pointer',
+                  '&:hover': { opacity: 0.8 }
+                }}
+                onClick={() => setRememberMe(!rememberMe)}
+                >
+                  {rememberMe ? (
+                    <CheckBoxIcon sx={{ color: '#667eea', mr: 1 }} />
+                  ) : (
+                    <CheckBoxOutlineBlankIcon sx={{ color: '#667eea', mr: 1 }} />
+                  )}
+                  <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                    Запомнить меня
+                  </Typography>
+                </Box>
+              )}
               
               <Box sx={{ display: 'flex', gap: 2 }}>
                 <Button

@@ -175,7 +175,7 @@ const MarketCardModal = ({
               mt: 2
             }}>
               <Typography variant="body2" sx={{ color: '#B0BEC5', textAlign: 'center' }}>
-                Игрок: {currentPlayer.name}
+                Игрок: {currentPlayer.username || currentPlayer.name || 'Игрок'}
               </Typography>
             </Box>
           )}

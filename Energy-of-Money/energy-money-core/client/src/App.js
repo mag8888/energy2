@@ -7,7 +7,7 @@ import OriginalGameBoard from './components/OriginalGameBoard';
 import ErrorBoundary from './components/ErrorBoundary';
 import socket from './socket';
 
-// 🎮 Интеграция модулей CASHFLOW
+// 🎮 Интеграция модулей Energy of Money
 import { 
   globalGameEngine, 
   integrateWithExistingRooms,
@@ -16,27 +16,33 @@ import {
 
 function AppRouter() {
   const navigate = useNavigate();
-  const [user, setUser] = useState(null);
-
-  // Загружаем сохраненного пользователя (если есть)
-  useEffect(() => {
-    const savedUser = localStorage.getItem('energy_of_money_user');
-    console.log('🔍 [App] Загружаем пользователя из localStorage:', savedUser);
-    if (savedUser) {
-      try {
-        const parsed = JSON.parse(savedUser);
-        console.log('✅ [App] Пользователь загружен:', parsed);
-        setUser(parsed);
-      } catch (error) {
-        console.error('❌ [App] Ошибка парсинга пользователя:', error);
-      }
-    } else {
-      console.log('⚠️ [App] Пользователь не найден в localStorage');
+  // Загружаем сохраненного пользователя из localStorage сразу при инициализации
+  const savedUser = localStorage.getItem('energy_of_money_user');
+  let initialUser = null;
+  
+  if (savedUser) {
+    try {
+      initialUser = JSON.parse(savedUser);
+      console.log('✅ [App] Пользователь загружен из localStorage:', initialUser);
+    } catch (error) {
+      console.error('❌ [App] Ошибка парсинга пользователя:', error);
     }
-  }, []);
+  } else {
+    console.log('⚠️ [App] Пользователь не найден в localStorage');
+  }
+
+  const [user, setUser] = useState(initialUser);
+
+  // Логируем изменения user
+  useEffect(() => {
+    console.log('🔄 [App] Состояние user изменилось:', user);
+    console.log('🔄 [App] Тип user:', typeof user);
+    console.log('🔄 [App] user === null:', user === null);
+  }, [user]);
 
   const playerData = useMemo(() => {
     console.log('🔄 [App] Обновляем playerData, user:', user);
+    console.log('🔄 [App] playerData useMemo вызван, user:', user);
     if (!user) {
       console.log('❌ [App] playerData: null (пользователь не зарегистрирован)');
       return null; // Возвращаем null если пользователь не зарегистрирован
@@ -60,6 +66,14 @@ function AppRouter() {
     setUser(null);
     localStorage.removeItem('energy_of_money_user');
     localStorage.removeItem('energy_of_money_player_name');
+    
+    // Если пользователь не выбрал "Запомнить меня", удаляем сохраненные данные
+    const rememberMe = localStorage.getItem('energy_of_money_remember_me');
+    if (!rememberMe) {
+      localStorage.removeItem('energy_of_money_remember_me');
+      console.log('🗑️ [App] Данные для автологина удалены при выходе');
+    }
+    
     navigate('/register'); // Переходим на страницу регистрации
   };
 
@@ -215,9 +229,9 @@ function AppRouter() {
 }
 
 function App() {
-  // 🎮 Инициализация игрового движка CASHFLOW
-  useEffect(() => {
-    console.log('🎮 [App] Инициализируем игровой движок CASHFLOW...');
+      // 🎮 Инициализация игрового движка Energy of Money
+    useEffect(() => {
+      console.log('🎮 [App] Инициализируем игровой движок Energy of Money...');
     
     // Инициализируем базовые комнаты в игровом движке
     const baseRooms = [
@@ -226,7 +240,7 @@ function App() {
     
     try {
       integrateWithExistingRooms(baseRooms);
-      console.log('✅ [App] Игровой движок CASHFLOW инициализирован');
+      console.log('✅ [App] Игровой движок Energy of Money инициализирован');
       
       // Логируем статистику
       const stats = getGameStatistics();
@@ -240,8 +254,30 @@ function App() {
   useEffect(() => {
     if (!socket) return;
     const onConnect = () => console.log('🔌 [EoM] Socket connected:', socket.id);
+    const onError = (error) => {
+      console.error('❌ [EoM] Socket error:', error);
+      // При критической ошибке сокета перенаправляем на страницу регистрации
+      if (window.location.pathname !== '/register') {
+        window.location.href = '/register';
+      }
+    };
+    const onDisconnect = (reason) => {
+      console.warn('⚠️ [EoM] Socket disconnected:', reason);
+      // При отключении от сервера перенаправляем на главную страницу
+      if (window.location.pathname.includes('/room/')) {
+        window.location.href = '/';
+      }
+    };
+    
     socket.on('connect', onConnect);
-    return () => { socket.off('connect', onConnect); };
+    socket.on('error', onError);
+    socket.on('disconnect', onDisconnect);
+    
+    return () => { 
+      socket.off('connect', onConnect);
+      socket.off('error', onError);
+      socket.off('disconnect', onDisconnect);
+    };
   }, []);
 
   return (

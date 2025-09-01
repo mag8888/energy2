@@ -144,6 +144,21 @@ socket.on('error', (error) => {
   console.error('💥 [Socket] General error:', error);
 });
 
+// Обработка ошибок восстановления состояния
+socket.on('restoreRoomStateError', (error) => {
+  console.error('❌ [Socket] Room state restore error:', error);
+  // Если не удалось восстановить состояние, перенаправляем на главную страницу
+  if (window.location.pathname.includes('/room/')) {
+    console.log('🔄 [Socket] Redirecting to home page due to restore error');
+    window.location.href = '/';
+  }
+});
+
+// Обработка успешного восстановления состояния
+socket.on('roomStateRestored', (data) => {
+  console.log('✅ [Socket] Room state restored successfully:', data);
+});
+
 // Экспортируем socket и функции
 export default socket;
 

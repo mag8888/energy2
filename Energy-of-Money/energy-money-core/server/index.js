@@ -4,6 +4,18 @@ const socketIo = require('socket.io');
 const cors = require('cors');
 const path = require('path');
 
+// Импортируем данные о профессиях
+const PROFESSIONS = [
+  { id: 1, name: 'Врач', icon: '👨‍⚕️' },
+  { id: 2, name: 'Курьер', icon: '🚚' },
+  { id: 3, name: 'Программист', icon: '💻' },
+  { id: 4, name: 'Учитель', icon: '👨‍🏫' },
+  { id: 5, name: 'Инженер', icon: '⚙️' },
+  { id: 6, name: 'Дизайнер', icon: '🎨' },
+  { id: 7, name: 'Менеджер', icon: '👔' },
+  { id: 8, name: 'Продавец', icon: '🛒' }
+];
+
 // Определяем порт
 const PORT = process.env.PORT || 5000;
 
@@ -29,10 +41,101 @@ const users = new Map(); // userId -> userData
 const usernameToUserId = new Map(); // username -> userId
 const rooms = new Map(); // roomId -> roomData
 
+// Функции для персистентного хранения
+const fs = require('fs');
+const roomsFilePath = path.join(__dirname, 'rooms.json');
+const usersFilePath = path.join(__dirname, 'users.json');
+
+// Загрузка комнат из файла
+const loadRooms = () => {
+  try {
+    if (fs.existsSync(roomsFilePath)) {
+      const data = fs.readFileSync(roomsFilePath, 'utf8');
+      const roomsData = JSON.parse(data);
+      rooms.clear();
+      for (const [roomId, roomData] of Object.entries(roomsData)) {
+        rooms.set(roomId, roomData);
+      }
+      console.log(`🏠 [SERVER] Загружено ${rooms.size} комнат из файла`);
+    }
+  } catch (error) {
+    console.error('❌ [SERVER] Ошибка загрузки комнат:', error);
+  }
+};
+
+// Сохранение комнат в файл
+const saveRooms = () => {
+  try {
+    const roomsData = {};
+    for (const [roomId, roomData] of rooms.entries()) {
+      roomsData[roomId] = roomData;
+    }
+    fs.writeFileSync(roomsFilePath, JSON.stringify(roomsData, null, 2));
+    console.log(`🏠 [SERVER] Сохранено ${rooms.size} комнат в файл`);
+  } catch (error) {
+    console.error('❌ [SERVER] Ошибка сохранения комнат:', error);
+  }
+};
+
+// Загрузка пользователей из файла
+const loadUsers = () => {
+  try {
+    if (fs.existsSync(usersFilePath)) {
+      const data = fs.readFileSync(usersFilePath, 'utf8');
+      const usersData = JSON.parse(data);
+      users.clear();
+      usernameToUserId.clear();
+      
+      for (const [userId, userData] of Object.entries(usersData)) {
+        users.set(userId, userData);
+        usernameToUserId.set(userData.username.toLowerCase(), userId);
+      }
+      console.log(`👤 [SERVER] Загружено ${users.size} пользователей из файла`);
+    }
+  } catch (error) {
+    console.error('❌ [SERVER] Ошибка загрузки пользователей:', error);
+  }
+};
+
+// Функция для получения названия профессии по ID
+const getProfessionName = (professionId) => {
+  const profession = PROFESSIONS.find(p => p.id === professionId);
+  return profession ? profession.name : 'Неизвестная профессия';
+};
+
+// Функция для преобразования данных игроков с professionId в profession
+const transformPlayersData = (players) => {
+  return players.map(player => ({
+    ...player,
+    profession: player.professionId ? getProfessionName(player.professionId) : null
+  }));
+};
+
+// Сохранение пользователей в файл
+const saveUsers = () => {
+  try {
+    const usersData = {};
+    for (const [userId, userData] of users.entries()) {
+      usersData[userId] = userData;
+    }
+    console.log(`👤 [SERVER] Сохраняем ${users.size} пользователей:`, Array.from(users.keys()));
+    console.log(`👤 [SERVER] Данные пользователей:`, usersData);
+    fs.writeFileSync(usersFilePath, JSON.stringify(usersData, null, 2));
+    console.log(`👤 [SERVER] Сохранено ${users.size} пользователей в файл`);
+  } catch (error) {
+    console.error('❌ [SERVER] Ошибка сохранения пользователей:', error);
+  }
+};
+
 // Система перерывов
 const breakTimers = new Map(); // roomId -> breakTimer
 const BREAK_INTERVAL = 50 * 60 * 1000; // 50 минут в миллисекундах
 const BREAK_DURATION = 10 * 60 * 1000; // 10 минут в миллисекундах
+
+// Игровая логика
+const gameStates = new Map(); // roomId -> gameState
+const turnTimers = new Map(); // roomId -> turnTimer
+const TURN_DURATION = 120; // 2 минуты на ход
 
 // Функция для генерации уникального User ID
 const generateUserId = () => {
@@ -59,8 +162,14 @@ const registerUser = (username, email, password, socketId) => {
     lastSeen: Date.now()
   };
   
+  console.log(`👤 [SERVER] Регистрируем пользователя:`, { username, email, userId });
+  console.log(`👤 [SERVER] Размер users до добавления:`, users.size);
   users.set(userId, userData);
   usernameToUserId.set(username.toLowerCase(), userId);
+  console.log(`👤 [SERVER] Размер users после добавления:`, users.size);
+  
+  // Сохраняем пользователей в файл
+  saveUsers();
   
   console.log(`👤 [SERVER] User registered: ${username} (${email}) (ID: ${userId})`);
   return userData;
@@ -103,8 +212,157 @@ const updateUserSocketId = (userId, socketId) => {
   if (user) {
     user.socketId = socketId;
     user.lastSeen = Date.now();
+    // Сохраняем пользователей в файл
+    saveUsers();
   }
 };
+
+// 🎮 Игровая логика
+const initializeGameState = (roomId) => {
+  const gameState = {
+    players: new Map(),
+    currentPlayerIndex: 0,
+    playerQueue: [],
+    gameStarted: false,
+    turnTimeLeft: TURN_DURATION,
+    currentPlayerId: null,
+    turnTimer: null
+  };
+  gameStates.set(roomId, gameState);
+  return gameState;
+};
+
+const getGameState = (roomId) => {
+  return gameStates.get(roomId) || initializeGameState(roomId);
+};
+
+const addPlayerToGame = (roomId, playerData, professionId) => {
+  const gameState = getGameState(roomId);
+  const player = {
+    id: playerData.id,
+    username: playerData.username,
+    socketId: playerData.socketId,
+    position: 1,
+    color: getPlayerColor(playerData.id),
+    professionId: professionId,
+    balance: 1000, // Будет обновлено из профессии
+    ready: false,
+    isOnBigCircle: false,
+    assets: [],
+    children: 0,
+    loans: {}
+  };
+  
+  gameState.players.set(player.id, player);
+  gameState.playerQueue.push(player.id);
+  
+  return player;
+};
+
+const getPlayerColor = (playerId) => {
+  const colors = ['#EF4444', '#3B82F6', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899'];
+  return colors[playerId % colors.length];
+};
+
+const startGame = (roomId) => {
+  const gameState = getGameState(roomId);
+  if (gameState.playerQueue.length < 2) {
+    throw new Error('Для начала игры нужно минимум 2 игрока');
+  }
+  
+  gameState.gameStarted = true;
+  gameState.currentPlayerIndex = 0;
+  gameState.currentPlayerId = gameState.playerQueue[0];
+  gameState.turnTimeLeft = TURN_DURATION;
+  
+  // Запускаем таймер хода
+  startTurnTimer(roomId);
+  
+  return {
+    gameStarted: true,
+    playerQueue: gameState.playerQueue,
+    currentPlayerId: gameState.currentPlayerId,
+    currentPlayerIndex: gameState.currentPlayerIndex
+  };
+};
+
+const nextTurn = (roomId) => {
+  const gameState = getGameState(roomId);
+  if (!gameState.gameStarted) return null;
+  
+  // Останавливаем текущий таймер
+  if (gameState.turnTimer) {
+    clearInterval(gameState.turnTimer);
+  }
+  
+  gameState.currentPlayerIndex = (gameState.currentPlayerIndex + 1) % gameState.playerQueue.length;
+  gameState.currentPlayerId = gameState.playerQueue[gameState.currentPlayerIndex];
+  gameState.turnTimeLeft = TURN_DURATION;
+  
+  // Запускаем новый таймер
+  startTurnTimer(roomId);
+  
+  return {
+    currentPlayerId: gameState.currentPlayerId,
+    currentPlayerIndex: gameState.currentPlayerIndex,
+    turnTimeLeft: gameState.turnTimeLeft
+  };
+};
+
+const startTurnTimer = (roomId) => {
+  const gameState = getGameState(roomId);
+  
+  gameState.turnTimer = setInterval(() => {
+    gameState.turnTimeLeft--;
+    
+    // Отправляем обновление времени всем игрокам в комнате
+    io.to(roomId).emit('turnTimeUpdate', {
+      turnTimeLeft: gameState.turnTimeLeft
+    });
+    
+    // Если время вышло, автоматически переходим к следующему ходу
+    if (gameState.turnTimeLeft <= 0) {
+      const nextTurnData = nextTurn(roomId);
+      io.to(roomId).emit('turnChanged', nextTurnData);
+    }
+  }, 1000);
+};
+
+const movePlayer = (roomId, playerId, diceValue) => {
+  const gameState = getGameState(roomId);
+  const player = gameState.players.get(playerId);
+  if (!player) return null;
+  
+  const newPosition = player.position + diceValue;
+  
+  // Логика перехода на большой круг
+  if (!player.isOnBigCircle && newPosition > 24) {
+    player.isOnBigCircle = true;
+    player.position = newPosition - 24;
+  } else if (player.isOnBigCircle) {
+    player.position = newPosition > 52 ? newPosition - 52 : newPosition;
+  } else {
+    player.position = newPosition > 24 ? newPosition - 24 : newPosition;
+  }
+  
+  return {
+    playerId,
+    newPosition: player.position,
+    isOnBigCircle: player.isOnBigCircle
+  };
+};
+
+const updatePlayerBalance = (roomId, playerId, amount) => {
+  const gameState = getGameState(roomId);
+  const player = gameState.players.get(playerId);
+  if (player) {
+    player.balance = Math.max(0, player.balance + amount);
+    return player.balance;
+  }
+  return null;
+};
+
+
 
 // Функция для запуска системы перерывов в комнате
 const startBreakSystem = (roomId) => {
@@ -325,8 +583,28 @@ const getRoomsList = () => {
   return roomsList;
 };
 
-// Создаем дефолтную комнату при запуске
-createDefaultRoom();
+// Создаем дефолтную комнату при запуске (если нет комнат)
+if (rooms.size === 0) {
+  createDefaultRoom();
+}
+
+// Функция для проверки состояния комнаты
+const checkRoomStatus = (roomId) => {
+  const room = rooms.get(roomId);
+  if (!room) {
+    console.log(`❌ [SERVER] Комната ${roomId} не найдена`);
+    return null;
+  }
+  
+  console.log(`🏠 [SERVER] Состояние комнаты ${roomId}:`);
+  console.log(`   - Название: ${room.displayName}`);
+  console.log(`   - Максимум игроков: ${room.maxPlayers}`);
+  console.log(`   - Текущих игроков: ${room.currentPlayers.length}`);
+  console.log(`   - Статус: ${room.status}`);
+  console.log(`   - Игроки:`, room.currentPlayers.map(p => ({ username: p.username, socketId: p.socketId, ready: p.ready })));
+  
+  return room;
+};
 
 // Socket.IO обработчики
 io.on('connection', (socket) => {
@@ -355,6 +633,12 @@ io.on('connection', (socket) => {
         // Пользователь найден - выполняем вход
         console.log(`🔄 [SERVER] Updating socketId for existing user: ${existingUser.username}`);
         updateUserSocketId(existingUser.id, socket.id);
+        
+        // Проверяем пароль для существующих пользователей
+        if (existingUser.password && existingUser.password !== trimmedPassword) {
+          callback({ success: false, error: 'Неверный пароль' });
+          return;
+        }
         
         callback({ 
           success: true, 
@@ -445,6 +729,26 @@ io.on('connection', (socket) => {
     console.log('🏠 [SERVER] Sent rooms list:', roomsList.length, 'rooms');
   });
   
+  // Проверка состояния комнаты
+  socket.on('checkRoomStatus', (roomId) => {
+    console.log(`🔍 [SERVER] checkRoomStatus requested for room: ${roomId}`);
+    console.log(`🔍 [SERVER] Socket ID: ${socket.id}`);
+    console.log(`🔍 [SERVER] Available rooms:`, Array.from(rooms.keys()));
+    
+    const room = checkRoomStatus(roomId);
+    const roomFound = !!room;
+    console.log(`🔍 [SERVER] Room found:`, roomFound ? 'YES' : 'NO');
+    
+    socket.emit('roomStatus', { roomId, room, roomFound });
+    console.log(`🔍 [SERVER] roomStatus event sent to socket: ${socket.id}`);
+    
+    // Также отправляем обновление игроков
+    if (room && room.currentPlayers) {
+      socket.emit('playersUpdate', transformPlayersData(room.currentPlayers));
+      console.log(`🔍 [SERVER] playersUpdate event sent to socket: ${socket.id}`);
+    }
+  });
+  
   // Создание комнаты
   socket.on('createRoom', (roomData) => {
     console.log('🏠 [SERVER] createRoom requested:', roomData);
@@ -531,6 +835,9 @@ io.on('connection', (socket) => {
         room: newRoom
       });
       
+      // Сохраняем комнаты в файл
+      saveRooms();
+      
       // Отправляем обновленный список комнат всем
       const roomsList = getRoomsList();
       io.emit('roomsList', roomsList);
@@ -597,7 +904,10 @@ io.on('connection', (socket) => {
       socket.emit('roomJoined', { success: true, roomId });
       
       // Отправляем обновленный список игроков в комнату
-      io.to(roomId).emit('playersUpdate', room.currentPlayers);
+      io.to(roomId).emit('playersUpdate', transformPlayersData(room.currentPlayers));
+      
+      // Сохраняем комнаты в файл
+      saveRooms();
       
       // Отправляем обновленный список комнат всем
       const roomsList = getRoomsList();
@@ -618,8 +928,9 @@ io.on('connection', (socket) => {
   });
   
   // Установка готовности игрока
-  socket.on('playerReady', (roomId, playerId) => {
-    console.log('🎯 [SERVER] Player ready requested:', { roomId, playerId });
+  socket.on('playerReady', (data) => {
+    const { roomId, playerId, professionId } = data;
+    console.log('🎯 [SERVER] Player ready requested:', { roomId, playerId, professionId });
     
     try {
       const room = rooms.get(roomId);
@@ -632,18 +943,194 @@ io.on('connection', (socket) => {
       const player = room.currentPlayers.find(p => p.socketId === socket.id);
       if (player) {
         player.ready = true;
-        console.log('🎯 [SERVER] Player marked as ready:', { roomId, username: player.username });
+        player.professionId = professionId;
+        console.log('🎯 [SERVER] Player marked as ready:', player.username, 'profession:', professionId);
         
-        // Отправляем обновленный список игроков в комнату
-        io.to(roomId).emit('playersUpdate', room.currentPlayers);
+        // Добавляем игрока в игровую логику
+        addPlayerToGame(roomId, player, professionId);
         
-        // Отправляем обновленный список комнат всем
-        const roomsList = getRoomsList();
-        io.emit('roomsList', roomsList);
+        // Отправляем обновление всем игрокам в комнате
+        io.to(roomId).emit('playersUpdate', transformPlayersData(room.currentPlayers));
+        
+        // Проверяем, готовы ли все игроки
+        const allReady = room.currentPlayers.every(p => p.ready);
+        if (allReady && room.currentPlayers.length >= 2) {
+          console.log('🎮 [SERVER] All players ready, game can start');
+          io.to(roomId).emit('allPlayersReady');
+        }
       }
     } catch (error) {
       console.error('❌ [SERVER] Error setting player ready:', error);
-      socket.emit('error', { message: 'Ошибка установки готовности' });
+      socket.emit('error', { message: 'Ошибка установки готовности игрока' });
+    }
+  });
+
+  // Начало игры
+  socket.on('startGame', (data) => {
+    const { roomId } = data;
+    console.log('🎮 [SERVER] Start game requested:', { roomId });
+    
+    try {
+      const room = rooms.get(roomId);
+      if (!room) {
+        socket.emit('error', { message: 'Комната не найдена' });
+        return;
+      }
+      
+      // Проверяем, что все игроки готовы
+      const allReady = room.currentPlayers.every(p => p.ready);
+      if (!allReady) {
+        socket.emit('error', { message: 'Не все игроки готовы' });
+        return;
+      }
+      
+      // Начинаем игру
+      const gameData = startGame(roomId);
+      console.log('🎮 [SERVER] Game started:', gameData);
+      
+      // Отправляем событие начала игры всем игрокам
+      io.to(roomId).emit('gameStarted', gameData);
+      
+    } catch (error) {
+      console.error('❌ [SERVER] Error starting game:', error);
+      socket.emit('error', { message: error.message });
+    }
+  });
+
+  // Бросок кубика
+  socket.on('playerRolledDice', (data) => {
+    const { roomId, playerId, diceValue } = data;
+    console.log('🎲 [SERVER] Player rolled dice:', { roomId, playerId, diceValue });
+    
+    try {
+      const gameState = getGameState(roomId);
+      if (!gameState.gameStarted) {
+        socket.emit('error', { message: 'Игра не началась' });
+        return;
+      }
+      
+      // Проверяем, что это ход данного игрока
+      if (gameState.currentPlayerId !== playerId) {
+        socket.emit('error', { message: 'Не ваш ход' });
+        return;
+      }
+      
+      // Двигаем игрока
+      const moveData = movePlayer(roomId, playerId, diceValue);
+      console.log('🎮 [SERVER] Player moved:', moveData);
+      
+      // Отправляем событие движения всем игрокам
+      io.to(roomId).emit('playerMoved', {
+        ...moveData,
+        diceValue
+      });
+      
+    } catch (error) {
+      console.error('❌ [SERVER] Error rolling dice:', error);
+      socket.emit('error', { message: 'Ошибка броска кубика' });
+    }
+  });
+
+  // Завершение хода
+  socket.on('playerEndTurn', (data) => {
+    const { roomId, playerId } = data;
+    console.log('⏭️ [SERVER] Player ended turn:', { roomId, playerId });
+    
+    try {
+      const gameState = getGameState(roomId);
+      if (!gameState.gameStarted) {
+        socket.emit('error', { message: 'Игра не началась' });
+        return;
+      }
+      
+      // Проверяем, что это ход данного игрока
+      if (gameState.currentPlayerId !== playerId) {
+        socket.emit('error', { message: 'Не ваш ход' });
+        return;
+      }
+      
+      // Переходим к следующему ходу
+      const turnData = nextTurn(roomId);
+      console.log('🔄 [SERVER] Turn changed:', turnData);
+      
+      // Отправляем событие смены хода всем игрокам
+      io.to(roomId).emit('turnChanged', turnData);
+      
+    } catch (error) {
+      console.error('❌ [SERVER] Error ending turn:', error);
+      socket.emit('error', { message: 'Ошибка завершения хода' });
+    }
+  });
+
+  // Завершение хода (новый обработчик)
+  socket.on('endTurn', (data) => {
+    const { roomId } = data;
+    console.log('⏭️ [SERVER] End turn requested:', { roomId, socketId: socket.id });
+    
+    try {
+      const room = rooms.get(roomId);
+      if (!room) {
+        socket.emit('error', { message: 'Комната не найдена' });
+        return;
+      }
+      
+      // Находим игрока по socketId
+      const player = room.currentPlayers.find(p => p.socketId === socket.id);
+      if (!player) {
+        socket.emit('error', { message: 'Игрок не найден в комнате' });
+        return;
+      }
+      
+      // Отправляем событие завершения хода
+      socket.emit('playerEndTurn', { roomId, playerId: player.id });
+      
+    } catch (error) {
+      console.error('❌ [SERVER] Error in endTurn:', error);
+      socket.emit('error', { message: 'Ошибка завершения хода' });
+    }
+  });
+
+  // Действие игрока (покупка, продажа и т.д.)
+  socket.on('playerAction', (data) => {
+    const { roomId, playerId, actionType, actionData } = data;
+    console.log('🎯 [SERVER] Player action:', { roomId, playerId, actionType, actionData });
+    
+    try {
+      const gameState = getGameState(roomId);
+      if (!gameState.gameStarted) {
+        socket.emit('error', { message: 'Игра не началась' });
+        return;
+      }
+      
+      // Обрабатываем различные типы действий
+      switch (actionType) {
+        case 'buyAsset':
+          // Логика покупки актива
+          break;
+        case 'sellAsset':
+          // Логика продажи актива
+          break;
+        case 'payExpense':
+          // Логика оплаты расходов
+          break;
+        case 'receiveIncome':
+          // Логика получения дохода
+          break;
+        default:
+          socket.emit('error', { message: 'Неизвестный тип действия' });
+          return;
+      }
+      
+      // Отправляем обновление всем игрокам
+      io.to(roomId).emit('playerActionCompleted', {
+        playerId,
+        actionType,
+        actionData
+      });
+      
+    } catch (error) {
+      console.error('❌ [SERVER] Error processing player action:', error);
+      socket.emit('error', { message: 'Ошибка обработки действия' });
     }
   });
 
@@ -833,7 +1320,7 @@ io.on('connection', (socket) => {
       console.log('🏠 [SERVER] Room data sent:', { roomId, displayName: room.displayName });
       
       // Также отправляем обновленный список игроков
-      socket.emit('playersUpdate', room.currentPlayers);
+      socket.emit('playersUpdate', transformPlayersData(room.currentPlayers));
       console.log('👥 [SERVER] Players update sent after roomData:', room.currentPlayers.length, 'players');
       
     } catch (error) {
@@ -850,6 +1337,7 @@ io.on('connection', (socket) => {
       const room = rooms.get(roomId);
       if (!room) {
         console.log('❌ [SERVER] Room not found for restore:', roomId);
+        socket.emit('restoreRoomStateError', { message: 'Комната не найдена' });
         return;
       }
       
@@ -882,14 +1370,22 @@ io.on('connection', (socket) => {
         });
         
         // Отправляем обновленный список игроков
-        io.to(roomId).emit('playersUpdate', room.currentPlayers);
+        io.to(roomId).emit('playersUpdate', transformPlayersData(room.currentPlayers));
+        
+        // Отправляем событие об успешном восстановлении
+        socket.emit('roomStateRestored', { 
+          roomId, 
+          username: existingPlayer.username 
+        });
         
         console.log('✅ [SERVER] Room state restored for player:', existingPlayer.username);
       } else {
         console.log('⚠️ [SERVER] Player not found in room, cannot restore state:', { roomId, socketId: socket.id });
+        socket.emit('restoreRoomStateError', { message: 'Игрок не найден в комнате' });
       }
     } catch (error) {
       console.error('❌ [SERVER] Error restoring room state:', error);
+      socket.emit('restoreRoomStateError', { message: 'Ошибка восстановления состояния' });
     }
   });
 
@@ -932,7 +1428,7 @@ io.on('connection', (socket) => {
       }
       
       // Отправляем обновление всем игрокам в комнате
-      io.to(roomId).emit('playersUpdate', room.currentPlayers);
+      io.to(roomId).emit('playersUpdate', transformPlayersData(room.currentPlayers));
       socket.emit('bankTransferSuccess', { 
         message: `Перевод $${amount} выполнен успешно`,
         newBalance: player.balance 
@@ -990,7 +1486,7 @@ io.on('connection', (socket) => {
       });
       
       // Отправляем обновление всем игрокам в комнате
-      io.to(roomId).emit('playersUpdate', room.currentPlayers);
+      io.to(roomId).emit('playersUpdate', transformPlayersData(room.currentPlayers));
       socket.emit('creditPaymentSuccess', { 
         message: `Погашение кредита $${amount} выполнено`,
         newBalance: player.balance,
@@ -1068,7 +1564,10 @@ io.on('connection', (socket) => {
         }
         
         // Отправляем обновленный список игроков
-        io.to(roomId).emit('playersUpdate', room.currentPlayers);
+        io.to(roomId).emit('playersUpdate', transformPlayersData(room.currentPlayers));
+        
+        // Сохраняем комнаты в файл
+        saveRooms();
         
         // Отправляем обновленный список комнат
         const roomsList = getRoomsList();
@@ -1088,6 +1587,15 @@ app.get('/api/rooms', (req, res) => {
   res.json(roomsList);
 });
 
+// Загружаем данные при запуске сервера
+loadUsers();
+loadRooms();
+
+// Создаем дефолтную комнату при запуске (если нет комнат)
+if (rooms.size === 0) {
+  createDefaultRoom();
+}
+
 // Запускаем сервер
 server.listen(PORT, () => {
   console.log(`🚀 Energy of Money Server запущен!`);
@@ -1100,10 +1608,14 @@ server.listen(PORT, () => {
 // Обработка завершения работы сервера
 process.on('SIGINT', () => {
   console.log('\n🛑 Shutting down server...');
+  saveUsers(); // Сохраняем пользователей перед выключением
+  saveRooms(); // Сохраняем комнаты перед выключением
   process.exit(0);
 });
 
 process.on('SIGTERM', () => {
   console.log('\n🛑 Shutting down server...');
+  saveUsers(); // Сохраняем пользователей перед выключением
+  saveRooms(); // Сохраняем комнаты перед выключением
   process.exit(0);
 });

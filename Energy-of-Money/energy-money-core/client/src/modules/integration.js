@@ -1,4 +1,4 @@
-// 🔗 Интеграция модулей CASHFLOW с текущим проектом
+// 🔗 Интеграция модулей Energy of Money с текущим проектом
 import { GameEngine } from './core/index.js';
 import { GameBoard } from './game/index.js';
 
@@ -121,4 +121,4 @@ export function cleanupRoom(roomId) {
 export { GameEngine } from './core/index.js';
 export { GameBoard } from './game/index.js';
 
-console.log('🔗 Модули CASHFLOW интегрированы с проектом!');
+console.log('🔗 Модули Energy of Money интегрированы с проектом!');

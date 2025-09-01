@@ -179,3 +179,4 @@ const BreakModal = ({ open, breakEndTime, duration, onClose }) => {
 
 export default BreakModal;
 
+

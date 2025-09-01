@@ -77,6 +77,7 @@ const RoomSetup = ({ playerData, onRoomSetup }) => {
   const [players, setPlayers] = useState([]);
   const [canStart, setCanStart] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
+  const [roomData, setRoomData] = useState(null);
   
   // Банковские операции
   const [bankBalance, setBankBalance] = useState(2500); // Текущий баланс
@@ -98,6 +99,11 @@ const RoomSetup = ({ playerData, onRoomSetup }) => {
   useEffect(() => {
     console.log('👥 [RoomSetup] Состояние players обновлено:', players);
     console.log('👥 [RoomSetup] Количество игроков в UI:', players.length);
+    console.log('👥 [RoomSetup] Детали игроков:', players.map(p => ({ 
+      username: p.username, 
+      socketId: p.socketId, 
+      ready: p.ready 
+    })));
     console.log('👤 [RoomSetup] Состояние карточки игрока:', { 
       selectedPlayer, 
       showPlayerCard, 
@@ -254,6 +260,7 @@ const RoomSetup = ({ playerData, onRoomSetup }) => {
     // Обработка данных комнаты
     socket.on('roomData', (data) => {
       console.log('🏠 [RoomSetup] Получены данные комнаты:', data);
+      setRoomData(data); // Сохраняем полные данные комнаты
       console.log('🏠 [RoomSetup] data.displayName:', data.displayName);
       console.log('🏠 [RoomSetup] data.roomId:', data.roomId);
       console.log('🏠 [RoomSetup] data.hostId:', data.hostId);
@@ -372,6 +379,22 @@ const RoomSetup = ({ playerData, onRoomSetup }) => {
       console.error('❌ [RoomSetup] Socket error:', error);
       setError(`Ошибка: ${error.message || 'Неизвестная ошибка'}`);
       setTimeout(() => setError(''), 5000);
+    });
+
+    // Обработка ошибок восстановления состояния
+    socket.on('restoreRoomStateError', (error) => {
+      console.error('❌ [RoomSetup] Room state restore error:', error);
+      setError('Не удалось восстановить состояние комнаты. Перенаправляем на главную страницу...');
+      setTimeout(() => {
+        window.location.href = '/';
+      }, 3000);
+    });
+
+    // Обработка успешного восстановления состояния
+    socket.on('roomStateRestored', (data) => {
+      console.log('✅ [RoomSetup] Room state restored successfully:', data);
+      setSuccess('Состояние комнаты восстановлено!');
+      setTimeout(() => setSuccess(''), 3000);
     });
 
     // Обработка переподключения
@@ -557,7 +580,63 @@ const RoomSetup = ({ playerData, onRoomSetup }) => {
     setIsReady(newReadyState);
     
     if (newReadyState) {
-      socket.emit('playerReady', roomId, socket.id);
+      // Проверяем, что у нас есть все необходимые данные
+      if (!playerData?.id) {
+        console.error('❌ [RoomSetup] playerData.id не определен');
+        setError('Ошибка: данные игрока не загружены');
+        return;
+      }
+      
+      // Проверяем, что мечта выбрана
+      let dreamToUse = selectedDream;
+      if (!dreamToUse?.id) {
+        console.log('⚠️ [RoomSetup] Мечта не выбрана, используем мечту хоста или первую доступную');
+        // Попробуем найти мечту хоста в данных комнаты
+        const hostDream = roomData?.hostDream;
+        if (hostDream?.id) {
+          dreamToUse = hostDream;
+          setSelectedDream(hostDream);
+          console.log('🌟 [RoomSetup] Установлена мечта хоста:', hostDream);
+        } else {
+          // Используем первую доступную мечту
+          dreamToUse = dreams[0];
+          setSelectedDream(dreamToUse);
+          console.log('🌟 [RoomSetup] Установлена первая доступная мечта:', dreamToUse);
+        }
+      }
+      
+      // Если профессия не выбрана, используем профессию хоста или первую доступную
+      let professionToUse = selectedProfession;
+      if (!professionToUse?.id) {
+        console.log('⚠️ [RoomSetup] Профессия не выбрана, используем профессию хоста');
+        // Попробуем найти профессию хоста в данных комнаты
+        const hostProfession = roomData?.hostProfession;
+        if (hostProfession?.id) {
+          professionToUse = hostProfession;
+          setSelectedProfession(hostProfession);
+          console.log('💼 [RoomSetup] Установлена профессия хоста:', hostProfession);
+        } else {
+          // Используем первую доступную профессию
+          professionToUse = PROFESSIONS[0];
+          setSelectedProfession(professionToUse);
+          console.log('💼 [RoomSetup] Установлена первая доступная профессия:', professionToUse);
+        }
+      }
+      
+      // Используем правильный формат с объектом
+      const readyData = {
+        roomId,
+        playerId: playerData.id,
+        professionId: professionToUse.id,
+        dreamId: dreamToUse.id // Добавляем ID выбранной мечты
+      };
+      console.log('🎯 [RoomSetup] Отправляем playerReady:', readyData);
+      console.log('🎯 [RoomSetup] playerData:', playerData);
+      console.log('🎯 [RoomSetup] selectedProfession:', selectedProfession);
+      console.log('🎯 [RoomSetup] selectedDream:', selectedDream);
+      console.log('🎯 [RoomSetup] dreamToUse:', dreamToUse);
+      console.log('🎯 [RoomSetup] professionToUse:', professionToUse);
+      socket.emit('playerReady', readyData);
       setSuccess('Вы готовы!');
     } else {
       setSuccess('Готовность снята');
@@ -570,8 +649,8 @@ const RoomSetup = ({ playerData, onRoomSetup }) => {
     // Сразу переходим к игровому полю
     setSuccess('Игра запускается! Переходим к игровому полю...');
     
-    // Отправляем событие на сервер
-    socket.emit('startGame', roomId);
+    // Отправляем событие на сервер с правильным форматом
+    socket.emit('startGame', { roomId });
     
     // Немедленно переходим к игровому полю
     setTimeout(() => {
@@ -583,11 +662,23 @@ const RoomSetup = ({ playerData, onRoomSetup }) => {
   const professions = PROFESSIONS;
 
   const dreams = [
-    { id: 1, name: 'Путешествие по миру', cost: 50000, description: 'Посетить все континенты' },
-    { id: 2, name: 'Собственный дом', cost: 200000, description: 'Купить дом своей мечты' },
-    { id: 3, name: 'Бизнес', cost: 100000, description: 'Открыть собственное дело' },
-    { id: 4, name: 'Образование', cost: 30000, description: 'Получить высшее образование' },
-    { id: 5, name: 'Благотворительность', cost: 75000, description: 'Помогать другим людям' }
+    { id: 2, name: 'Построить дом мечты для семьи', cost: 100000, description: 'Реализация мечты о собственном доме для семьи' },
+    { id: 6, name: 'Посетить Антарктиду', cost: 150000, description: 'Экстремальное путешествие на самый южный континент' },
+    { id: 12, name: 'Подняться на все высочайшие вершины мира', cost: 500000, description: 'Покорение семи высочайших вершин планеты (Seven Summits)' },
+    { id: 16, name: 'Жить год на яхте в Средиземном море', cost: 300000, description: 'Годовая жизнь на роскошной яхте в прекрасном климате' },
+    { id: 18, name: 'Создать фонд поддержки талантов', cost: 300000, description: 'Основание благотворительного фонда для помощи одаренным людям' },
+    { id: 20, name: 'Организовать мировой фестиваль', cost: 200000, description: 'Проведение масштабного международного культурного события' },
+    { id: 24, name: 'Туристический комплекс (эко-ранчо)', cost: 1000000, description: 'Создание экологического туристического комплекса' },
+    { id: 26, name: 'Биржа', cost: 50000, description: 'Разово выплачивается 500 000$ если выпало 5 или 6 на кубике' },
+    { id: 28, name: 'NFT-платформа', cost: 400000, description: 'Создание платформы для торговли NFT' },
+    { id: 30, name: 'Полет на Марс', cost: 300000, description: 'Реализация мечты о космическом путешествии на Красную планету' },
+    { id: 32, name: 'Создать школу будущего для детей', cost: 300000, description: 'Создание инновационной школы для детей' },
+    { id: 35, name: 'Кругосветное плавание на паруснике', cost: 200000, description: 'Кругосветное путешествие на парусном судне' },
+    { id: 37, name: 'Белоснежная Яхта', cost: 300000, description: 'Приобретение роскошной белоснежной яхты' },
+    { id: 42, name: 'Белоснежная Яхта', cost: 300000, description: 'Приобретение роскошной белоснежной яхты' },
+    { id: 44, name: 'Организовать благотворительный фонд', cost: 200000, description: 'Создание благотворительного фонда' },
+    { id: 46, name: 'Полёт в космос', cost: 250000, description: 'Реализация мечты о космическом путешествии' },
+    { id: 48, name: 'Кругосветное путешествие', cost: 300000, description: 'Путешествие вокруг света для изучения разных стран' }
   ];
 
   console.log('🎨 [RoomSetup] Рендерим компонент');
@@ -789,7 +880,12 @@ const RoomSetup = ({ playerData, onRoomSetup }) => {
                         ⚠️ Профессия не выбрана
                       </Typography>
                     )}
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    {!selectedDream && (
+                      <Typography variant="h6" sx={{ color: '#ff9800', mb: 1 }}>
+                        ⚠️ Мечта не выбрана
+                      </Typography>
+                    )}
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
                       <Chip 
                         label={isReady ? '✅ Готов к игре' : '⏳ Не готов'} 
                         size="medium" 
@@ -799,6 +895,17 @@ const RoomSetup = ({ playerData, onRoomSetup }) => {
                           fontWeight: 'bold'
                         }}
                       />
+                      {selectedDream && (
+                        <Chip 
+                          label={`⭐ ${selectedDream.name}`} 
+                          size="small" 
+                          sx={{ 
+                            bgcolor: '#ff9800', 
+                            color: 'white',
+                            fontWeight: 'bold'
+                          }}
+                        />
+                      )}
                       <Typography variant="body2" sx={{ color: '#666', fontStyle: 'italic' }}>
                         Нажмите для просмотра карточки
                       </Typography>
@@ -1166,6 +1273,11 @@ const RoomSetup = ({ playerData, onRoomSetup }) => {
                           <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.9)', mb: 1 }}>
                             {player.ready ? '✅ Готов к игре' : '⏳ Не готов'}
                           </Typography>
+                          {player.dream && (
+                            <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.8)', mb: 1, fontSize: '0.8rem' }}>
+                              ⭐ {player.dream}
+                            </Typography>
+                          )}
                           {player.profession && player.profession !== 'none' ? (
                             <Chip 
                               label={player.profession} 
@@ -1194,19 +1306,21 @@ const RoomSetup = ({ playerData, onRoomSetup }) => {
                           <Typography variant="h4" sx={{ color: 'rgba(255, 255, 255, 0.8)' }} title="Нажмите для просмотра карточки">
                             👆
                           </Typography>
-                          <Button
-                              size="small"
-                              variant="outlined"
+                          <Box
                               onClick={(e) => {
                                 e.stopPropagation();
                                 handlePlayerAssetsClick(player);
                               }}
                               sx={{
-                                minWidth: 'auto',
+                                cursor: 'pointer',
                                 p: 0.5,
-                                borderColor: '#4caf50',
+                                border: '1px solid #4caf50',
+                                borderRadius: 1,
                                 color: '#4caf50',
                                 fontSize: '0.7rem',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
                                 '&:hover': {
                                   bgcolor: 'rgba(76, 175, 80, 0.1)'
                                 }
@@ -1214,7 +1328,7 @@ const RoomSetup = ({ playerData, onRoomSetup }) => {
                               title="Просмотреть активы"
                             >
                               💼
-                            </Button>
+                            </Box>
                           </Box>
                         </Box>
                       </Button>

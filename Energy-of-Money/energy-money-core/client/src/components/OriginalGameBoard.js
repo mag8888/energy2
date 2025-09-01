@@ -1,4 +1,4 @@
-import React, { useState, useEffect, Fragment } from 'react';
+import React, { useState, useEffect, Fragment, useCallback } from 'react';
 import { Box, Typography, Button, LinearProgress, Avatar, Chip, Snackbar, Alert, Dialog, DialogTitle, DialogContent, DialogActions, TextField, Select, MenuItem, FormControl, InputLabel, List, ListItem, ListItemText, Divider, Grid, useMediaQuery, useTheme, IconButton } from '@mui/material';
 import { motion } from 'framer-motion';
 import FullProfessionCard from './FullProfessionCard';
@@ -7,6 +7,9 @@ import ExpenseCardModal from './ExpenseCardModal';
 import BreakModal from './BreakModal';
 import { MarketDeckManager, checkPlayerHasMatchingAsset } from '../data/marketCards';
 import { ExpenseDeckManager } from '../data/expenseCards';
+import socket from '../socket';
+import { PROFESSIONS } from '../data/professions';
+import { useGameManager } from './GameManager';
 import { 
   Timer, 
   ExitToApp,
@@ -20,7 +23,17 @@ import {
 
 const OriginalGameBoard = ({ roomId, playerData, onExit }) => {
   console.log('🎮 [OriginalGameBoard] Компонент загружен:', { roomId, playerData });
-  console.log('🎮 [OriginalGameBoard] Компонент обновлен - добавляем отладочную информацию');
+  
+  // Функция для безопасного получения имени игрока
+  const getPlayerName = (player) => {
+    return player?.username || player?.name || 'Игрок';
+  };
+  
+  // Функция для безопасного получения первой буквы имени
+  const getPlayerInitial = (player) => {
+    const name = getPlayerName(player);
+    return name.charAt(0);
+  };
   
   // Хуки для адаптивности
   const theme = useTheme();
@@ -28,6 +41,25 @@ const OriginalGameBoard = ({ roomId, playerData, onExit }) => {
   
   // Состояние мобильного меню
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  
+  // Используем новую игровую логику
+  const {
+    gameState,
+    getCurrentPlayer,
+    isCurrentPlayer,
+    getAllPlayers,
+    sendPlayerReady,
+    sendRollDice,
+    sendEndTurn,
+    sendStartGame,
+    sendPlayerAction
+  } = useGameManager(roomId, playerData);
+  
+  // Извлекаем данные из gameState
+  const { players, currentPlayerId, gameStarted, turnTimeLeft } = gameState;
+  const currentPlayer = getCurrentPlayer();
+  const myPlayer = players.find(p => p.socketId === socket.id);
+  const isMyTurn = isCurrentPlayer(myPlayer?.id);
   
   // CSS стили для анимаций
   useEffect(() => {
@@ -158,20 +190,11 @@ const OriginalGameBoard = ({ roomId, playerData, onExit }) => {
   const [diceValue, setDiceValue] = useState(1);
   const [isRolling, setIsRolling] = useState(false);
   const [timerProgress, setTimerProgress] = useState(100);
-  const [turnTimeLeft, setTurnTimeLeft] = useState(120); // 2 минуты = 120 секунд
   const [isTurnEnding, setIsTurnEnding] = useState(false);
-  const [canRollDice, setCanRollDice] = useState(true);
+  
+  // Состояние для игровой логики
+  const [canRollDice, setCanRollDice] = useState(false);
   const [diceRolled, setDiceRolled] = useState(false);
-  
-  // Состояние игроков и их фишек - начинают с 1-й клетки (малый круг)
-  const [players, setPlayers] = useState([
-    { id: 1, name: 'MAG', position: 1, color: '#EF4444', profession: 'Инженер' },
-    { id: 2, name: 'Алексей', position: 1, color: '#3B82F6', profession: 'Менеджер' },
-    { id: 3, name: 'Мария', position: 1, color: '#10B981', profession: 'Дизайнер' },
-    { id: 4, name: 'Дмитрий', position: 1, color: '#F59E0B', profession: 'Программист' }
-  ]);
-  
-  const [currentPlayer, setCurrentPlayer] = useState(0); // Индекс текущего игрока
   const [isMoving, setIsMoving] = useState(false); // Флаг движения фишки
   const [movingPlayerId, setMovingPlayerId] = useState(null); // ID движущегося игрока
   
@@ -297,13 +320,119 @@ const OriginalGameBoard = ({ roomId, playerData, onExit }) => {
   useEffect(() => {
     initializeDealDeck();
   }, []);
+
+  // Функции для работы с игроками
+  const initializePlayer = useCallback((playerData, profession) => {
+    return {
+      id: playerData.id,
+      username: playerData.username,
+      socketId: playerData.socketId,
+      position: 1, // Начинают с 1-й клетки
+      color: getPlayerColor(playerData.id),
+      profession: profession,
+      balance: profession.balance || 1000,
+      salary: profession.salary || 0,
+      passiveIncome: profession.passiveIncome || 0,
+      totalExpenses: profession.totalExpenses || 0,
+      cashFlow: profession.cashFlow || 0,
+      ready: false,
+      isOnBigCircle: false, // Начинают на малом круге
+      assets: [],
+      children: 0,
+      loans: {
+        auto: profession.creditAuto || 0,
+        education: profession.creditEducation || 0,
+        housing: profession.creditHousing || 0,
+        cards: profession.creditCards || 0
+      }
+    };
+  }, []);
+
+  const getPlayerColor = useCallback((playerId) => {
+    const colors = ['#EF4444', '#3B82F6', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899'];
+    return colors[playerId % colors.length];
+  }, []);
+
+
+
+
   
+
+
+  // Обновляем canRollDice на основе isMyTurn
+  useEffect(() => {
+    setCanRollDice(isMyTurn && gameStarted);
+  }, [isMyTurn, gameStarted]);
+  
+  // Состояние для названия комнаты
+  const [roomName, setRoomName] = useState('Загрузка...');
+  
+  // Обработчик для проверки состояния комнаты
+  useEffect(() => {
+    const handleRoomStatus = (data) => {
+      console.log('🏠 [OriginalGameBoard] Получен статус комнаты:', data);
+      if (data.room && data.room.displayName) {
+        setRoomName(data.room.displayName);
+      }
+    };
+    
+    // Обработчик для всех событий (отладка)
+    const handleAnyEvent = (eventName, ...args) => {
+      console.log(`🏠 [OriginalGameBoard] Получено событие ${eventName}:`, args);
+    };
+    
+    socket.on('roomStatus', handleRoomStatus);
+    
+    // Слушаем все события для отладки
+    socket.onAny(handleAnyEvent);
+    
+    // Запрашиваем информацию о комнате при загрузке
+    if (roomId) {
+      console.log('🏠 [OriginalGameBoard] Запрашиваем информацию о комнате:', roomId);
+      console.log('🏠 [OriginalGameBoard] Socket состояние:', socket.connected, socket.id);
+      
+      // Добавляем небольшую задержку перед запросом
+      setTimeout(() => {
+        socket.emit('checkRoomStatus', roomId);
+        console.log('🏠 [OriginalGameBoard] Запрос checkRoomStatus отправлен');
+      }, 1000);
+      
+      // Периодически запрашиваем статус комнаты каждые 3 секунды
+      const interval = setInterval(() => {
+        socket.emit('checkRoomStatus', roomId);
+        console.log('🏠 [OriginalGameBoard] Периодический запрос checkRoomStatus отправлен');
+      }, 3000);
+      
+      return () => {
+        clearInterval(interval);
+        socket.off('roomStatus', handleRoomStatus);
+        socket.offAny(handleAnyEvent);
+      };
+    }
+  }, [roomId]);
+
   // Автоматически сворачиваем мобильное меню, если не ход игрока
   useEffect(() => {
     if (isMobile && !canRollDice) {
       setIsMobileMenuOpen(false);
     }
   }, [isMobile, canRollDice]);
+
+  // Обновление прогресса таймера
+  useEffect(() => {
+    if (turnTimeLeft !== undefined && turnTimeLeft > 0) {
+      const maxTime = 120; // 2 минуты = 120 секунд
+      const progress = (turnTimeLeft / maxTime) * 100;
+      setTimerProgress(progress);
+      
+      // Если осталось меньше 10 секунд, показываем предупреждение
+      if (turnTimeLeft <= 10) {
+        setIsTurnEnding(true);
+      } else {
+        setIsTurnEnding(false);
+      }
+    }
+  }, [turnTimeLeft]);
 
   // Функция инициализации колоды сделок
   const initializeDealDeck = () => {
@@ -418,7 +547,7 @@ const OriginalGameBoard = ({ roomId, playerData, onExit }) => {
 
   // Функция броска кубика
   const rollDice = () => {
-    if (isRolling || !canRollDice) return;
+    if (isRolling || !canRollDice || !isMyTurn) return;
     
     setIsRolling(true);
     setDiceRolled(true);
@@ -461,8 +590,8 @@ const OriginalGameBoard = ({ roomId, playerData, onExit }) => {
       setDiceValue(finalValue);
       setIsRolling(false);
       
-      // Двигаем фишку текущего игрока
-      movePlayer(finalValue);
+      // Отправляем ход на сервер через новую логику
+      sendRollDice(finalValue);
       
       // Через 10 секунд после броска кнопка превращается в "Переход хода"
       setTimeout(() => {
@@ -509,7 +638,7 @@ const OriginalGameBoard = ({ roomId, playerData, onExit }) => {
   const handleTransferAssetToPlayer = (playerIndex) => {
     if (!selectedAssetForTransfer) return;
     
-    const currentPlayerData = players[currentPlayer];
+    const currentPlayerData = getCurrentPlayer();
     const targetPlayer = players[playerIndex];
     
     // Передаем одну акцию/актив
@@ -906,7 +1035,6 @@ const OriginalGameBoard = ({ roomId, playerData, onExit }) => {
         
         // Обновляем позицию игрока
         player.position = currentPosition;
-        setPlayers([...updatedPlayers]);
         
         // Продолжаем движение
         setTimeout(moveStep, 200); // 200ms между шагами
@@ -930,7 +1058,7 @@ const OriginalGameBoard = ({ roomId, playerData, onExit }) => {
 
   // Функция обработки действий клетки
   const handleCellAction = (position) => {
-    const player = players[currentPlayer];
+    const player = currentPlayer;
     
     // Всегда логика большого круга
       handleBigCircleCellAction(position);
@@ -940,7 +1068,7 @@ const OriginalGameBoard = ({ roomId, playerData, onExit }) => {
 
   // Функция обработки действий клетки на большом круге
   const handleBigCircleCellAction = (position) => {
-    const player = players[currentPlayer];
+    const player = currentPlayer;
     
     // Клетки дохода от инвестиций (25, 38, 51, 64)
     if ([25, 38, 51, 64].includes(position)) {
@@ -1308,7 +1436,7 @@ const OriginalGameBoard = ({ roomId, playerData, onExit }) => {
       ...updatedPlayers[currentPlayer],
       balance: updatedPlayers[currentPlayer].balance - currentExpenseCard.cost
     };
-    setPlayers(updatedPlayers);
+
     
     // Откладываем карточку в отбой
     expenseDeckManager.discardCard(currentExpenseCard);
@@ -1344,11 +1472,9 @@ const OriginalGameBoard = ({ roomId, playerData, onExit }) => {
       balance: updatedPlayers[currentPlayer].balance + shortfall,
       credits: (updatedPlayers[currentPlayer].credits || 0) + shortfall
     };
-    setPlayers(updatedPlayers);
     
     // Списываем стоимость расхода
     updatedPlayers[currentPlayer].balance -= currentExpenseCard.cost;
-    setPlayers(updatedPlayers);
     
     // Откладываем карточку в отбой
     expenseDeckManager.discardCard(currentExpenseCard);
@@ -2102,16 +2228,24 @@ const OriginalGameBoard = ({ roomId, playerData, onExit }) => {
 
   // Функции для кнопок управления игрой
   const handlePlayerTurn = (playerIndex) => {
-    if (playerIndex === currentPlayer) {
-      console.log(`🎯 [OriginalGameBoard] Ход игрока ${players[playerIndex].name} уже активен`);
+    // Получаем всех игроков из gameState
+    const allPlayers = getAllPlayers();
+    const targetPlayer = allPlayers[playerIndex];
+    
+    if (!targetPlayer) {
+      console.log(`🎯 [OriginalGameBoard] Игрок с индексом ${playerIndex} не найден`);
       return;
     }
     
-    console.log(`🎯 [OriginalGameBoard] Переключение на игрока ${players[playerIndex].name}`);
-    setCurrentPlayer(playerIndex);
+    if (targetPlayer.id === currentPlayer?.id) {
+      console.log(`🎯 [OriginalGameBoard] Ход игрока ${targetPlayer.name} уже активен`);
+      return;
+    }
+    
+    console.log(`🎯 [OriginalGameBoard] Переключение на игрока ${targetPlayer.name}`);
+
     
     // Сбрасываем таймер для нового игрока
-    setTurnTimeLeft(120);
     setTimerProgress(100);
     setIsTurnEnding(false);
     setCanRollDice(true);
@@ -2120,7 +2254,7 @@ const OriginalGameBoard = ({ roomId, playerData, onExit }) => {
     // Показываем уведомление
     setToast({
       open: true,
-      message: `🎯 Ход передан игроку ${players[playerIndex].name}`,
+      message: `🎯 Ход передан игроку ${targetPlayer.name}`,
       severity: 'info'
     });
   };
@@ -2129,31 +2263,34 @@ const OriginalGameBoard = ({ roomId, playerData, onExit }) => {
 
   // Функция для перехода хода
   const passTurn = () => {
+    // Получаем всех игроков из gameState
+    const allPlayers = getAllPlayers();
+    
     // Проверяем, есть ли дополнительный ход
     if (hasExtraTurn) {
       setHasExtraTurn(false);
       setToast({
         open: true,
-        message: `🎯 Дополнительный ход! ${players[currentPlayer].name} ходит еще раз!`,
+        message: `🎯 Дополнительный ход! ${currentPlayer?.name} ходит еще раз!`,
         severity: 'success'
       });
       
       // Сбрасываем таймер для того же игрока
-      setTurnTimeLeft(120);
       setTimerProgress(100);
       setIsTurnEnding(false);
       setCanRollDice(true);
       setDiceRolled(false);
       
-      console.log(`🎯 [OriginalGameBoard] Дополнительный ход для игрока ${players[currentPlayer].name}`);
+      console.log(`🎯 [OriginalGameBoard] Дополнительный ход для игрока ${currentPlayer?.name}`);
       return;
     }
     
-    const nextPlayer = (currentPlayer + 1) % players.length;
-    setCurrentPlayer(nextPlayer);
+    // Находим индекс текущего игрока
+    const currentPlayerIndex = allPlayers.findIndex(p => p.id === currentPlayer?.id);
+    const nextPlayerIndex = (currentPlayerIndex + 1) % allPlayers.length;
+    const nextPlayer = allPlayers[nextPlayerIndex];
     
     // Сбрасываем таймер для нового игрока
-    setTurnTimeLeft(120);
     setTimerProgress(100);
     setIsTurnEnding(false);
     setCanRollDice(true);
@@ -2162,11 +2299,11 @@ const OriginalGameBoard = ({ roomId, playerData, onExit }) => {
     // Показываем уведомление
     setToast({
       open: true,
-      message: `⏭️ Ход передан игроку ${players[nextPlayer].name}`,
+      message: `⏭️ Ход передан игроку ${nextPlayer?.name}`,
       severity: 'info'
     });
     
-    console.log(`⏭️ [OriginalGameBoard] Ход передан игроку ${players[nextPlayer].name}`);
+    console.log(`⏭️ [OriginalGameBoard] Ход передан игроку ${nextPlayer?.name}`);
   };
 
   // Функции для банковских операций
@@ -2200,7 +2337,7 @@ const OriginalGameBoard = ({ roomId, playerData, onExit }) => {
     }
 
     // Выполняем перевод
-    const currentPlayerName = players[currentPlayer]?.name || 'Неизвестно';
+    const currentPlayerName = currentPlayer?.name || 'Неизвестно';
     const newTransfer = {
       id: Date.now(),
       from: currentPlayerName,
@@ -2244,62 +2381,7 @@ const OriginalGameBoard = ({ roomId, playerData, onExit }) => {
     return assets.reduce((total, asset) => total + (asset.income * (asset.quantity || 1)), 0);
   };
 
-  // Таймер хода - 2 минуты на весь ход
-  useEffect(() => {
-    let interval;
-    
-    if (turnTimeLeft > 0) {
-      interval = setInterval(() => {
-        setTurnTimeLeft(prev => {
-          const newTime = prev - 1;
-          
-          // Обновляем прогресс таймера
-          const progress = Math.round((newTime / 120) * 100);
-          setTimerProgress(progress);
-          
-          // Проверяем критические моменты
-          if (newTime <= 20) {
-            setIsTurnEnding(true);
-            // Воспроизводим звуковой сигнал
-            if (newTime <= 20 && newTime > 19) {
-              // Здесь можно добавить звуковой сигнал
-              console.log('🔴 ВНИМАНИЕ! Осталось 20 секунд!');
-            }
-          } else if (newTime <= 60) {
-            setIsTurnEnding(false);
-          }
-          
-          // Если время истекло
-          if (newTime <= 0) {
-            console.log('⏰ Время хода истекло!');
-            // Автоматически переходим к следующему игроку
-            setTimeout(() => {
-              const nextPlayer = (currentPlayer + 1) % players.length;
-              setCurrentPlayer(nextPlayer);
-              setTurnTimeLeft(120);
-              setTimerProgress(100);
-              setIsTurnEnding(false);
-              setCanRollDice(true);
-              setDiceRolled(false);
-              
-              // Показываем уведомление
-              setToast({
-                open: true,
-                message: `⏰ Ход передан игроку ${players[nextPlayer].name} (время истекло)`,
-                severity: 'warning'
-              });
-            }, 1000);
-          }
-          
-          return newTime;
-        });
-      }, 1000);
-    }
-    
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [turnTimeLeft, currentPlayer, players]);
+
 
   return (
     <Fragment>
@@ -2330,6 +2412,14 @@ const OriginalGameBoard = ({ roomId, playerData, onExit }) => {
             mb: isMobile ? 0.5 : 1
           }}>
             🐛 DEBUG: OriginalGameBoard.js (3 топ актива + упрощенный логотип + профили + банк)
+          </Typography>
+          <Typography variant="h6" sx={{ 
+            color: '#8B5CF6',
+            fontWeight: 'bold',
+            fontSize: isMobile ? '1rem' : '1.2rem',
+            mb: isMobile ? 0.5 : 1
+          }}>
+            🏠 Комната: {roomName}
           </Typography>
         </Box>
         
@@ -2375,18 +2465,21 @@ const OriginalGameBoard = ({ roomId, playerData, onExit }) => {
             gap: isMobile ? 1 : 2
           }}>
             <Avatar sx={{ 
-              bgcolor: players[currentPlayer]?.color,
+              bgcolor: currentPlayer?.color,
               width: isMobile ? 35 : 40,
               height: isMobile ? 35 : 40
             }}>
-              {players[currentPlayer]?.name.charAt(0)}
+              {currentPlayer?.name?.charAt(0)}
             </Avatar>
             <Box>
               <Typography variant={isMobile ? "body1" : "h6"} sx={{ color: 'white', fontWeight: 'bold' }}>
-                {players[currentPlayer]?.name}
+                {currentPlayer?.name}
               </Typography>
               <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.8)', fontSize: isMobile ? '0.8rem' : 'inherit' }}>
-                {players[currentPlayer]?.profession}
+                {currentPlayer?.profession?.name}
+              </Typography>
+              <Typography variant="body2" sx={{ color: '#F59E0B', fontSize: isMobile ? '0.7rem' : '0.8rem', fontWeight: 'bold' }}>
+                🎯 Сейчас ход
               </Typography>
               {isOnBigCircle && (
                 <Typography variant="body2" sx={{ color: '#22C55E', fontSize: isMobile ? '0.7rem' : '0.8rem', fontWeight: 'bold' }}>
@@ -2520,24 +2613,9 @@ const OriginalGameBoard = ({ roomId, playerData, onExit }) => {
           backdropFilter: 'blur(20px)',
           boxShadow: '0 25px 50px rgba(0, 0, 0, 0.3)',
           overflow: 'hidden'
-        }}>
-          
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-          {/* PNG логотип в центре */}
+        }}
+      >
+        {/* PNG логотип в центре */}
           <Box
             sx={{
               position: 'absolute',
@@ -3222,9 +3300,9 @@ const OriginalGameBoard = ({ roomId, playerData, onExit }) => {
                         boxShadow: '0 8px 25px rgba(0,0,0,0.5), 0 0 20px rgba(255,255,255,0.4)'
                       }
                     }}
-                    title={`${player.name} - ${player.profession} (позиция: ${player.position})`}
+                    title={`${player.username || player.name} - ${player.profession} (позиция: ${player.position})`}
                   >
-                    {player.name.charAt(0)}
+                    {(player.username || player.name || '?').charAt(0)}
                   </Box>
                 </motion.div>
               );
@@ -3699,7 +3777,7 @@ const OriginalGameBoard = ({ roomId, playerData, onExit }) => {
             border: '1px solid rgba(255, 255, 255, 0.2)'
           }}>
             <Typography variant={isMobile ? "body1" : "h6"} sx={{ color: 'white', mb: isMobile ? 1 : 2, display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Timer /> Время хода
+              <Timer /> Время хода {currentPlayer && `• ${getPlayerName(currentPlayer)}`}
             </Typography>
             <LinearProgress 
               variant="determinate" 
@@ -3730,6 +3808,36 @@ const OriginalGameBoard = ({ roomId, playerData, onExit }) => {
             }}>
               {Math.floor(turnTimeLeft / 60)}:{(turnTimeLeft % 60).toString().padStart(2, '0')} • {turnTimeLeft > 60 ? '🟢' : turnTimeLeft > 20 ? '🟡' : '🔴'} {turnTimeLeft > 60 ? 'Первая минута' : turnTimeLeft > 20 ? 'Вторая минута' : 'КРИТИЧЕСКОЕ ВРЕМЯ!'}
             </Typography>
+            
+            {/* Кнопка перехода хода */}
+            <Button
+              variant="contained"
+              onClick={() => {
+                console.log('🎯 [OriginalGameBoard] Переход хода запрошен');
+                socket.emit('endTurn', { roomId });
+              }}
+              disabled={!isMyTurn}
+              sx={{
+                mt: isMobile ? 1 : 2,
+                background: isMyTurn 
+                  ? 'linear-gradient(45deg, #10B981, #059669)' 
+                  : 'linear-gradient(45deg, #6B7280, #4B5563)',
+                color: 'white',
+                fontWeight: 'bold',
+                px: isMobile ? 2 : 3,
+                py: isMobile ? 0.8 : 1,
+                borderRadius: isMobile ? '20px' : '25px',
+                fontSize: isMobile ? '0.9rem' : 'inherit',
+                textTransform: 'uppercase',
+                '&:hover': {
+                  background: isMyTurn 
+                    ? 'linear-gradient(45deg, #059669, #047857)' 
+                    : 'linear-gradient(45deg, #6B7280, #4B5563)'
+                }
+              }}
+            >
+              ⏭️ ПЕРЕХОД ХОДА
+            </Button>
           </Box>
         </motion.div>
 
@@ -3749,87 +3857,102 @@ const OriginalGameBoard = ({ roomId, playerData, onExit }) => {
             <Typography variant={isMobile ? "body1" : "h6"} sx={{ color: 'white', mb: isMobile ? 1 : 2, display: 'flex', alignItems: 'center', gap: 1 }}>
               <Group /> Очередность игроков
             </Typography>
+            <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={() => {
+                  console.log('🎮 [OriginalGameBoard] Текущий gameState:', gameState);
+                  console.log('🎮 [OriginalGameBoard] Все игроки:', getAllPlayers());
+                }}
+                sx={{
+                  color: 'rgba(255, 255, 255, 0.7)',
+                  borderColor: 'rgba(255, 255, 255, 0.3)',
+                  fontSize: '0.7rem'
+                }}
+              >
+                🔍 Отладка
+              </Button>
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={() => {
+                  const testPlayer = {
+                    id: `test_${Date.now()}`,
+                    name: `Тест_${Math.floor(Math.random() * 1000)}`,
+                    profession: { name: 'Тестер' },
+                    color: '#FF6B6B'
+                  };
+                  console.log('🎮 [OriginalGameBoard] Добавляем тестового игрока:', testPlayer);
+                  // Здесь можно добавить логику добавления игрока
+                }}
+                sx={{
+                  color: 'rgba(255, 255, 255, 0.7)',
+                  borderColor: 'rgba(255, 255, 255, 0.3)',
+                  fontSize: '0.7rem'
+                }}
+              >
+                ➕ Тест
+              </Button>
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={() => {
+                  console.log('🔍 [OriginalGameBoard] Проверяем состояние текущей комнаты:', roomId);
+                  console.log('🔍 [OriginalGameBoard] Socket состояние:', socket.connected, socket.id);
+                  socket.emit('checkRoomStatus', roomId);
+                  
+                  // Добавляем таймаут для проверки ответа
+                  setTimeout(() => {
+                    console.log('🔍 [OriginalGameBoard] Проверка завершена (таймаут 3 сек)');
+                  }, 3000);
+                }}
+                sx={{
+                  color: 'rgba(255, 255, 255, 0.7)',
+                  borderColor: 'rgba(255, 255, 255, 0.3)',
+                  fontSize: '0.7rem'
+                }}
+              >
+                🏠 {roomName}
+              </Button>
+            </Box>
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-              <Button
-                variant="text"
-                fullWidth
-                onClick={() => handlePlayerTurn(0)}
-                sx={{
-                  p: isMobile ? 0.5 : 1,
-                  background: currentPlayer === 0 ? '#8B5CF6' : 'transparent',
-                  color: 'white',
-                  borderRadius: isMobile ? '6px' : '8px',
-                  textTransform: 'none',
-                  fontSize: isMobile ? '0.8rem' : '0.9rem',
-                  fontWeight: 'bold',
-                  border: currentPlayer === 0 ? 'none' : '1px solid rgba(255,255,255,0.3)',
-                  '&:hover': {
-                    background: currentPlayer === 0 ? '#7C3AED' : 'rgba(255,255,255,0.1)'
-                  }
-                }}
-              >
-                1. MAG {currentPlayer === 0 ? '(Ход)' : ''}
-              </Button>
-              <Button
-                variant="text"
-                fullWidth
-                onClick={() => handlePlayerTurn(1)}
-                sx={{
-                  p: isMobile ? 0.5 : 1,
-                  background: currentPlayer === 1 ? '#8B5CF6' : 'transparent',
-                  color: 'white',
-                  borderRadius: isMobile ? '6px' : '8px',
-                  textTransform: 'none',
-                  fontSize: isMobile ? '0.8rem' : '0.9rem',
-                  fontWeight: 'bold',
-                  border: currentPlayer === 1 ? 'none' : '1px solid rgba(255,255,255,0.3)',
-                  '&:hover': {
-                    background: currentPlayer === 1 ? '#7C3AED' : 'rgba(255,255,255,0.1)'
-                  }
-                }}
-              >
-                2. Алексей {currentPlayer === 1 ? '(Ход)' : ''}
-              </Button>
-              <Button
-                variant="text"
-                fullWidth
-                onClick={() => handlePlayerTurn(2)}
-                sx={{
-                  p: isMobile ? 0.5 : 1,
-                  background: currentPlayer === 2 ? '#8B5CF6' : 'transparent',
-                  color: 'white',
-                  borderRadius: isMobile ? '6px' : '8px',
-                  textTransform: 'none',
-                  fontSize: isMobile ? '0.8rem' : '0.9rem',
-                  fontWeight: 'bold',
-                  border: currentPlayer === 2 ? 'none' : '1px solid rgba(255,255,255,0.3)',
-                  '&:hover': {
-                    background: currentPlayer === 2 ? '#7C3AED' : 'rgba(255,255,255,0.1)'
-                  }
-                }}
-              >
-                3. Мария {currentPlayer === 2 ? '(Ход)' : ''}
-              </Button>
-              <Button
-                variant="text"
-                fullWidth
-                onClick={() => handlePlayerTurn(3)}
-                sx={{
-                  p: isMobile ? 0.5 : 1,
-                  background: currentPlayer === 3 ? '#8B5CF6' : 'transparent',
-                  color: 'white',
-                  borderRadius: isMobile ? '6px' : '8px',
-                  textTransform: 'none',
-                  fontSize: isMobile ? '0.8rem' : '0.9rem',
-                  fontWeight: 'bold',
-                  border: currentPlayer === 3 ? 'none' : '1px solid rgba(255,255,255,0.3)',
-                  '&:hover': {
-                    background: currentPlayer === 3 ? '#7C3AED' : 'rgba(255,255,255,0.1)'
-                  }
-                }}
-              >
-                4. Дмитрий {currentPlayer === 3 ? '(Ход)' : ''}
-              </Button>
+              {(() => {
+                const allPlayers = getAllPlayers();
+                console.log('🎮 [OriginalGameBoard] Все игроки в комнате:', allPlayers);
+                console.log('🎮 [OriginalGameBoard] Количество игроков:', allPlayers.length);
+                console.log('🎮 [OriginalGameBoard] gameState.players:', gameState.players);
+                
+                if (allPlayers.length === 0) {
+                  return (
+                    <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.6)', textAlign: 'center', py: 2 }}>
+                      Ожидание игроков... (Debug: getAllPlayers() вернул пустой массив)
+                    </Typography>
+                  );
+                }
+                
+                return allPlayers.map((player, index) => (
+                  <Box
+                    key={player.id}
+                    onClick={() => handlePlayerTurn(index)}
+                    sx={{
+                      p: isMobile ? 0.5 : 1,
+                      background: currentPlayer?.id === player.id ? '#8B5CF6' : 'transparent',
+                      color: 'white',
+                      borderRadius: isMobile ? '6px' : '8px',
+                      fontSize: isMobile ? '0.8rem' : '0.9rem',
+                      fontWeight: 'bold',
+                      border: currentPlayer?.id === player.id ? 'none' : '1px solid rgba(255,255,255,0.3)',
+                      cursor: 'pointer',
+                      '&:hover': {
+                        background: currentPlayer?.id === player.id ? '#7C3AED' : 'rgba(255,255,255,0.1)'
+                      }
+                    }}
+                  >
+                    {index + 1}. {player.username || player.name || 'Игрок'} {currentPlayer?.id === player.id ? '(Ход)' : ''}
+                  </Box>
+                ));
+              })()}
             </Box>
             
 
@@ -3911,10 +4034,10 @@ const OriginalGameBoard = ({ roomId, playerData, onExit }) => {
                   mx: 'auto',
                   mb: 2
                 }}>
-                  {selectedPlayer.name?.charAt(0) || '?'}
+                  {(selectedPlayer.username || selectedPlayer.name)?.charAt(0) || '?'}
                 </Avatar>
                 <Typography variant="h4" sx={{ color: 'white', fontWeight: 'bold', mb: 1 }}>
-                  {selectedPlayer.name}
+                  {selectedPlayer.username || selectedPlayer.name || 'Игрок'}
                 </Typography>
                 <Typography variant="h6" sx={{ color: '#94A3B8', mb: 2 }}>
                   {selectedPlayer.profession}
@@ -3953,7 +4076,7 @@ const OriginalGameBoard = ({ roomId, playerData, onExit }) => {
                 
                 {/* Статус хода */}
                 <Box sx={{
-                  background: currentPlayer === players.findIndex(p => p.name === selectedPlayer.name) 
+                                      background: currentPlayer === players.findIndex(p => (p.username || p.name) === (selectedPlayer.username || selectedPlayer.name)) 
                     ? 'rgba(16, 185, 129, 0.2)' 
                     : 'rgba(107, 114, 128, 0.2)',
                   borderRadius: '10px',
@@ -3961,12 +4084,12 @@ const OriginalGameBoard = ({ roomId, playerData, onExit }) => {
                   display: 'inline-block'
                 }}>
                   <Typography variant="body2" sx={{ 
-                    color: currentPlayer === players.findIndex(p => p.name === selectedPlayer.name) 
+                    color: currentPlayer === players.findIndex(p => (p.username || p.name) === (selectedPlayer.username || selectedPlayer.name)) 
                       ? '#10B981' 
                       : '#6B7280',
                     fontWeight: 'bold'
                   }}>
-                    {currentPlayer === players.findIndex(p => p.name === selectedPlayer.name) 
+                    {currentPlayer === players.findIndex(p => (p.username || p.name) === (selectedPlayer.username || selectedPlayer.name)) 
                       ? '🎯 Активный ход' 
                       : '⏳ Ожидание хода'}
                   </Typography>
@@ -4045,9 +4168,9 @@ const OriginalGameBoard = ({ roomId, playerData, onExit }) => {
                 </Typography>
                 
                 <Typography variant="body2" sx={{ color: '#94A3B8', textAlign: 'center', lineHeight: 1.6 }}>
-                  Игрок {selectedPlayer.name} участвует в игре "Energy of Money". 
+                  Игрок {selectedPlayer.username || selectedPlayer.name || 'Игрок'} участвует в игре "Energy of Money". 
                   {selectedPlayer.profession && ` Профессия: ${selectedPlayer.profession}.`}
-                  {currentPlayer === players.findIndex(p => p.name === selectedPlayer.name) 
+                                      {currentPlayer === players.findIndex(p => (p.username || p.name) === (selectedPlayer.username || selectedPlayer.name)) 
                     ? ' Сейчас его ход!' 
                     : ' Ожидает своей очереди.'}
                 </Typography>
@@ -4374,7 +4497,7 @@ const OriginalGameBoard = ({ roomId, playerData, onExit }) => {
                         transition: 'all 0.2s ease-in-out'
                       }}
                     >
-                      🎯 {player.name}
+                      🎯 {player.username || player.name || 'Игрок'}
                     </Button>
                   )
                 ))}
@@ -4484,8 +4607,8 @@ const OriginalGameBoard = ({ roomId, playerData, onExit }) => {
                     }}
                   >
                     {players.map((player, index) => (
-                      <MenuItem key={index} value={player.name} disabled={index === currentPlayer}>
-                        {player.name} {index === currentPlayer ? '(Вы)' : ''}
+                                          <MenuItem key={index} value={player.username || player.name} disabled={index === currentPlayer}>
+                      {player.username || player.name || 'Игрок'} {index === currentPlayer ? '(Вы)' : ''}
                       </MenuItem>
                     ))}
                   </Select>
@@ -5197,7 +5320,7 @@ const OriginalGameBoard = ({ roomId, playerData, onExit }) => {
                     transition: 'all 0.2s ease-in-out'
                   }}
                 >
-                  🎯 {player.name}
+                                      🎯 {player.username || player.name || 'Игрок'}
                 </Button>
               )
             ))}
@@ -5743,11 +5866,11 @@ const OriginalGameBoard = ({ roomId, playerData, onExit }) => {
                       width: 40,
                       height: 40
                     }}>
-                      {player.name.charAt(0)}
+                      {(player.username || player.name || '?').charAt(0)}
                     </Avatar>
                     <Box>
                       <Typography variant="h6" sx={{ color: '#FFFFFF', fontWeight: 'bold' }}>
-                        {player.name}
+                        {player.username || player.name || 'Игрок'}
                         {player.hasWon && <span style={{ color: '#F59E0B', marginLeft: '8px' }}>👑</span>}
                       </Typography>
                       <Typography variant="body2" sx={{ color: '#94A3B8' }}>
