@@ -9,13 +9,5 @@
       "runtime": "automatic"
     }]
   ],
-  "plugins": [],
-  "env": {
-    "production": {
-      "plugins": []
-    },
-    "development": {
-      "plugins": ["react-refresh/babel"]
-    }
-  }
+  "plugins": []
 }
