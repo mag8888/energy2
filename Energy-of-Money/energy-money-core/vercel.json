@@ -23,6 +23,7 @@
     "SKIP_PREFLIGHT_CHECK": "true",
     "ESLINT_NO_DEV_ERRORS": "true",
     "ESLINT_USE_FLAT_CONFIG": "false",
-    "BABEL_ENV": "production"
+    "BABEL_ENV": "production",
+    "FAST_REFRESH": "false"
   }
 }
