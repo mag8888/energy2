@@ -47,3 +47,4 @@ npm start
 ## Зависимости
 
 Все необходимые зависимости указаны в `package.json` файлах клиента и сервера.
+# Force Vercel update Thu Sep  4 20:19:53 MSK 2025
