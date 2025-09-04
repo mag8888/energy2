@@ -1150,8 +1150,8 @@ const RoomSetup = ({ playerData, onRoomSetup }) => {
                     >
                       <CardContent>
                         <Typography variant="h6" sx={{ mb: 1, color: '#333' }}>
-                          {dream.name}
-                        </Typography>
+                            {dream.name}
+                          </Typography>
                         <Typography variant="body2" sx={{ color: '#666', mb: 1 }}>
                           💰 Стоимость: {dream.cost}₽
                         </Typography>
@@ -1201,35 +1201,35 @@ const RoomSetup = ({ playerData, onRoomSetup }) => {
               </Typography>
               <Grid container spacing={2}>
                 {players.map((player, index) => (
-                  <Grid item xs={12} sm={6} md={4} key={player.socketId}>
-                    <Button
-                      variant="contained"
-                      fullWidth
-                      size="large"
-                      onClick={() => {
-                        console.log('👥 [RoomSetup] Кнопка игрока нажата:', player.username);
-                        handlePlayerClick(player);
-                      }}
-                      sx={{
-                        p: 2,
+                    <Grid item xs={12} sm={6} md={4} key={player.socketId}>
+                      <Button
+                        variant="contained"
+                        fullWidth
+                        size="large"
+                        onClick={() => {
+                          console.log('👥 [RoomSetup] Кнопка игрока нажата:', player.username);
+                          handlePlayerClick(player);
+                        }}
+                        sx={{
+                          p: 2,
                         background: index === 0 
                           ? 'linear-gradient(135deg, #9c27b0 0%, #7b1fa2 100%)'
                           : 'linear-gradient(135deg, #1976d2 0%, #1565c0 100%)',
                         color: 'white',
-                        borderRadius: 2,
-                        textTransform: 'none',
-                        fontSize: '1rem',
-                        fontWeight: 'bold',
-                        transition: 'all 0.3s ease',
+                          borderRadius: 2,
+                          textTransform: 'none',
+                          fontSize: '1rem',
+                          fontWeight: 'bold',
+                          transition: 'all 0.3s ease',
                         border: index === 0 ? '3px solid #9c27b0' : '1px solid #1976d2',
-                        '&:hover': {
-                          transform: 'translateY(-2px)',
-                          boxShadow: 6,
+                          '&:hover': {
+                            transform: 'translateY(-2px)',
+                            boxShadow: 6,
                           background: index === 0 
                             ? 'linear-gradient(135deg, #7b1fa2 0%, #6a1b9a 100%)'
                             : 'linear-gradient(135deg, #1565c0 0%, #0d47a1 100%)'
-                        }
-                      }}
+                          }
+                        }}
                     >
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, width: '100%' }}>
                         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>

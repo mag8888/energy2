@@ -585,7 +585,7 @@ const getRoomsList = () => {
 
 // Создаем дефолтную комнату при запуске (если нет комнат)
 if (rooms.size === 0) {
-  createDefaultRoom();
+createDefaultRoom();
 }
 
 // Функция для проверки состояния комнаты
