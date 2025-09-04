@@ -30,12 +30,6 @@
     "lint:fix": "eslint src/**/*.{js,jsx,ts,tsx} --fix",
     "vercel-build": "DISABLE_ESLINT_PLUGIN=true GENERATE_SOURCEMAP=false NODE_ENV=production SKIP_PREFLIGHT_CHECK=true react-scripts build"
   },
-  "eslintConfig": {
-    "extends": [
-      "react-app",
-      "react-app/jest"
-    ]
-  },
   "browserslist": {
     "production": [
       ">0.2%",

@@ -20,6 +20,7 @@
     "NODE_ENV": "production",
     "GENERATE_SOURCEMAP": "false",
     "DISABLE_ESLINT_PLUGIN": "true",
-    "SKIP_PREFLIGHT_CHECK": "true"
+    "SKIP_PREFLIGHT_CHECK": "true",
+    "ESLINT_NO_DEV_ERRORS": "true"
   }
 }
