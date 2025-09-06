@@ -89,6 +89,7 @@ function App() {
             onExit={handleExitGame}
           />
         );
+      }
       case 'home':
       default:
         return (
