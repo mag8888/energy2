@@ -33,7 +33,8 @@ const BankModal = ({ open = false, onClose = () => {}, onTransfer = () => {}, pl
       return;
     }
 
-    if (amount > currentPlayer.balance) {
+    const balance = Number(currentPlayer?.balance || 0);
+    if (amount > balance) {
       setError('Недостаточно средств');
       return;
     }
