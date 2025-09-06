@@ -2,22 +2,30 @@ const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 const cors = require('cors');
+const path = require('path');
+const fs = require('fs');
 
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
-  cors: { 
-    origin: 'http://localhost:3000', 
-    methods: ['GET', 'POST'],
+  cors: {
+    origin: (origin, callback) => { callback(null, true); },
+    methods: ['GET','POST'],
     credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization']
+    allowedHeaders: ['Content-Type','Authorization']
   },
-  transports: ['websocket', 'polling'],
+  transports: ['websocket','polling'],
   allowEIO3: true
 });
 
 app.use(cors());
 app.use(express.json());
+
+const clientBuildPath = require('path').join(__dirname, '..', 'client', 'build');
+if (require('fs').existsSync(clientBuildPath)) {
+  console.log('🧱 [SERVER] Serving client build from', clientBuildPath);
+  app.use(express.static(clientBuildPath));
+}
 
 const rooms = new Map();
 const users = new Map();
@@ -461,6 +469,14 @@ function startNextTurn(roomId) {
 }
 
 const PORT = process.env.PORT || 5000;
+
+
+if (require('fs').existsSync(clientBuildPath)) {
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/health') || req.path.startsWith('/socket.io')) return next();
+    res.sendFile(require('path').join(clientBuildPath, 'index.html'));
+  });
+}
 
 server.listen(PORT, () => {
   console.log(`🚀 Energy of Money Server запущен!`);
