@@ -49,20 +49,20 @@ const RoomCreation = ({ user, onRoomCreated, onBack }) => {
 
   // Цветовая схема
   const colors = {
-    primary: '#1976d2',
-    primaryDark: '#1565c0',
-    primaryLight: '#e3f2fd',
-    secondary: '#ff9800',
-    secondaryDark: '#f57c00',
-    secondaryLight: '#fff3e0',
-    background: '#f8f9fa',
-    surface: '#ffffff',
-    text: '#212121',
-    textSecondary: '#757575',
-    border: '#e0e0e0',
-    error: '#f44336',
-    success: '#4caf50',
-    warning: '#ff9800'
+    primary: '#8B5CF6',
+    primaryDark: '#7C3AED',
+    primaryLight: '#F3E8FF',
+    secondary: '#A78BFA',
+    secondaryDark: '#6D28D9',
+    secondaryLight: '#DDD6FE',
+    background: '#0F1020',
+    surface: '#12142A',
+    text: '#EDE9FE',
+    textSecondary: '#C4B5FD',
+    border: '#2A2F45',
+    error: '#EF4444',
+    success: '#10B981',
+    warning: '#F59E0B'
   };
 
   // Генерация названия комнаты по умолчанию
@@ -222,7 +222,7 @@ const RoomCreation = ({ user, onRoomCreated, onBack }) => {
           </Box>
 
           {/* Информация о пользователе */}
-          <Card sx={{ mb: 3, bgcolor: colors.primaryLight }}>
+          <Card sx={{ mb: 3, bgcolor: colors.surface, border: '1px solid '+colors.border }}>
             <CardContent>
               <Typography variant="h6" sx={{ color: colors.primaryDark, mb: 1 }}>
                 👤 Создатель: {user?.username}

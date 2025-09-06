@@ -19,6 +19,7 @@ import {
 import AuthForm from './components/AuthForm';
 import RoomsPage from './pages/RoomsPage';
 import GameBoard from './components/GameBoard';
+import OriginalGameBoard from './components/original/OriginalGameBoard';
 import socket from './socket';
 
 function App() {
@@ -73,7 +74,13 @@ function App() {
       case 'rooms':
         console.log('🔌 [App] Rendering RoomsPage with socket:', socket);
         return <RoomsPage socket={socket} user={user} onGameStart={handleGameStart} />;
-      case 'game':
+      case 'game':{
+        const useOriginal = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('original')==='1';
+        if (useOriginal){
+          return (
+            <OriginalGameBoard roomId={currentGame?.id} socket={socket} user={user} onExit={handleExitGame} />
+          );
+        }
         return (
           <GameBoard 
             roomId={currentGame?.id} 
