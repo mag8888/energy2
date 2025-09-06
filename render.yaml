@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: energy2-app
+    env: node
+    rootDir: .
+    plan: free
+    buildCommand: |
+      npm --prefix client install --no-audit --no-fund
+      npm --prefix client run build
+      npm --prefix server install --no-audit --no-fund
+    startCommand: node server/index.js
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: 20
+      - key: NPM_CONFIG_LEGACY_PEER_DEPS
+        value: "true"
