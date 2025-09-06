@@ -478,6 +478,16 @@ if (require('fs').existsSync(clientBuildPath)) {
   });
 }
 
+
+// Debug endpoint to inspect client build presence
+app.get('/__debug', (req,res)=>{
+  try {
+    const exists = fs.existsSync(clientBuildPath);
+    const files = exists ? fs.readdirSync(clientBuildPath).slice(0,50) : [];
+    res.json({ exists, clientBuildPath, files });
+  } catch(e){ res.status(500).json({ error: e.message }); }
+});
+
 server.listen(PORT, () => {
   console.log(`🚀 Energy of Money Server запущен!`);
   console.log(`🌐 HTTP: http://localhost:${PORT}`);
