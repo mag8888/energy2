@@ -11,7 +11,7 @@ import CellPopup from '../CellPopup';
 import { MarketDeckManager, checkPlayerHasMatchingAsset } from '../../data/original/marketCards';
 import { ExpenseDeckManager } from '../../data/original/expenseCards';
 import { CELL_CONFIG } from '../../data/gameCells';
-import { PLAYER_COLORS, assignPlayerColor, getColorByIndex, getContrastTextColor } from '../../data/gameCells';
+import { PLAYER_COLORS, assignPlayerColor, getColorByIndex, getContrastTextColor } from '../../styles/playerColors';
 import { 
   Timer, 
   ExitToApp,
