@@ -19,7 +19,7 @@ import {
 import AuthForm from './components/AuthForm';
 import RoomsPage from './pages/RoomsPage';
 import GameBoard from './components/GameBoard';
-import OriginalGameBoard from './components/original/OriginalGameBoard';
+import OriginalGameBoard from './components/original/OriginalGameBoard.full';
 import socket from './socket';
 
 function App() {
