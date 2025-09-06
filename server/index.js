@@ -24,10 +24,34 @@ app.use(express.json());
 const clientBuildPath = require('path').join(__dirname, '..', 'client', 'build');
 if (require('fs').existsSync(clientBuildPath)) {
   console.log('🧱 [SERVER] Serving client build from', clientBuildPath);
-  app.use(express.static(clientBuildPath));
-  app.use('/static', express.static(path.join(clientBuildPath, 'static')));
-  app.get('/', (req, res) => { res.sendFile(path.join(clientBuildPath, 'index.html')); });
-  app.get('/index.html', (req, res) => { res.sendFile(path.join(clientBuildPath, 'index.html')); });
+  // Статика: по умолчанию кэшируем все не-HTML файлы на год (immutable)
+  app.use(
+    express.static(clientBuildPath, {
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith('.html')) {
+          res.setHeader('Cache-Control', 'no-store');
+        } else {
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        }
+      }
+    })
+  );
+  // Явная раздача /static с долгим кэшем
+  app.use(
+    '/static',
+    express.static(path.join(clientBuildPath, 'static'), {
+      setHeaders: (res) => res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+    })
+  );
+  // Индекс: никогда не кэшируем, чтобы не залипал старый бандл
+  app.get('/', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.sendFile(path.join(clientBuildPath, 'index.html'));
+  });
+  app.get('/index.html', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.sendFile(path.join(clientBuildPath, 'index.html'));
+  });
 }
 
 const rooms = new Map();
