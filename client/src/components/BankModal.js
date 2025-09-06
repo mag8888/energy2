@@ -16,7 +16,7 @@ import {
 } from '@mui/material';
 import { motion } from 'framer-motion';
 
-const BankModal = ({ open, onClose, onTransfer, players, currentPlayer }) => {
+const BankModal = ({ open = false, onClose = () => {}, onTransfer = () => {}, players = [], currentPlayer = {} }) => {
   const [transferTo, setTransferTo] = useState('');
   const [transferAmount, setTransferAmount] = useState('');
   const [error, setError] = useState('');
@@ -49,7 +49,8 @@ const BankModal = ({ open, onClose, onTransfer, players, currentPlayer }) => {
     onClose();
   };
 
-  const availablePlayers = players.filter(p => p.id !== currentPlayer?.id);
+  const safePlayers = Array.isArray(players) ? players : [];
+  const availablePlayers = safePlayers.filter(p => p && p.id !== currentPlayer?.id);
 
   return (
     <Dialog
