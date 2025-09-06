@@ -25,6 +25,10 @@ const clientBuildPath = require('path').join(__dirname, '..', 'client', 'build')
 if (require('fs').existsSync(clientBuildPath)) {
   console.log('🧱 [SERVER] Serving client build from', clientBuildPath);
   app.use(express.static(clientBuildPath));
+  // Explicitly serve CRA static folder
+  app.use('/static', express.static(path.join(clientBuildPath, 'static')));
+  // Serve index on root
+  app.get('/', (req, res) => { res.sendFile(path.join(clientBuildPath, 'index.html')); });
 }
 
 const rooms = new Map();
@@ -477,6 +481,16 @@ if (require('fs').existsSync(clientBuildPath)) {
     res.sendFile(require('path').join(clientBuildPath, 'index.html'));
   });
 }
+
+
+// Debug endpoint to inspect client build presence
+app.get('/__debug', (req,res)=>{
+  try {
+    const exists = fs.existsSync(clientBuildPath);
+    const files = exists ? fs.readdirSync(clientBuildPath).slice(0,50) : [];
+    res.json({ exists, clientBuildPath, files });
+  } catch(e){ res.status(500).json({ error: e.message }); }
+});
 
 server.listen(PORT, () => {
   console.log(`🚀 Energy of Money Server запущен!`);
