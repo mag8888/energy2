@@ -25,6 +25,9 @@ const clientBuildPath = require('path').join(__dirname, '..', 'client', 'build')
 if (require('fs').existsSync(clientBuildPath)) {
   console.log('🧱 [SERVER] Serving client build from', clientBuildPath);
   app.use(express.static(clientBuildPath));
+  app.use('/static', express.static(path.join(clientBuildPath, 'static')));
+  app.get('/', (req, res) => { res.sendFile(path.join(clientBuildPath, 'index.html')); });
+  app.get('/index.html', (req, res) => { res.sendFile(path.join(clientBuildPath, 'index.html')); });
 }
 
 const rooms = new Map();
