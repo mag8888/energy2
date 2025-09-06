@@ -26,6 +26,30 @@ function App() {
   const [currentPage, setCurrentPage] = useState('home');
   const [user, setUser] = useState(null);
   const [currentGame, setCurrentGame] = useState(null);
+  // Original board toggle (persisted)
+  const [useOriginalBoard, setUseOriginalBoard] = useState(() => {
+    try {
+      const qs = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+      if (qs && qs.get('original') === '1') return true;
+      return localStorage.getItem('use_original_board') === '1';
+    } catch { return false; }
+  });
+
+  const toggleOriginalBoard = () => {
+    setUseOriginalBoard(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem('use_original_board', next ? '1' : '0');
+        if (typeof window !== 'undefined') {
+          const url = new URL(window.location.href);
+          if (next) url.searchParams.set('original', '1');
+          else url.searchParams.delete('original');
+          window.history.replaceState({}, '', url);
+        }
+      } catch {}
+      return next;
+    });
+  };
 
   useEffect(() => {
     // Проверяем, есть ли сохраненный пользователь
@@ -75,8 +99,7 @@ function App() {
         console.log('🔌 [App] Rendering RoomsPage with socket:', socket);
         return <RoomsPage socket={socket} user={user} onGameStart={handleGameStart} />;
       case 'game':{
-        const useOriginal = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('original')==='1';
-        if (useOriginal){
+        if (useOriginalBoard){
           return (
             <OriginalGameBoard roomId={currentGame?.id} socket={socket} user={user} onExit={handleExitGame} />
           );
@@ -168,6 +191,15 @@ function App() {
                 onClick={() => setCurrentPage('rooms')}
               >
                 Комнаты
+              </Button>
+              
+              <Button 
+                variant="outlined"
+                color="inherit"
+                onClick={toggleOriginalBoard}
+                sx={{ ml: 1 }}
+              >
+                Original: {useOriginalBoard ? 'ON' : 'OFF'}
               </Button>
               
               {currentGame && (
