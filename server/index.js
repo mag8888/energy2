@@ -2,12 +2,17 @@ const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 const cors = require('cors');
+const path = require('path');
+const fs = require('fs');
 
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
-  cors: { 
-    origin: 'http://localhost:3000', 
+  cors: {
+    origin: (origin, callback) => {
+      // Разрешаем все источники (для продакшена можно указать домен через env)
+      callback(null, true);
+    },
     methods: ['GET', 'POST'],
     credentials: true,
     allowedHeaders: ['Content-Type', 'Authorization']
@@ -18,6 +23,13 @@ const io = socketIo(server, {
 
 app.use(cors());
 app.use(express.json());
+
+// Отдача статики: приоритетно из React build
+const clientBuildPath = path.join(__dirname, '..', 'client', 'build');
+if (fs.existsSync(clientBuildPath)) {
+  console.log('🧱 [SERVER] Serving client build from', clientBuildPath);
+  app.use(express.static(clientBuildPath));
+}
 
 const rooms = new Map();
 const users = new Map();
@@ -52,6 +64,14 @@ app.get('/api/rooms/:roomId', (req, res) => {
   }
   res.json({ room });
 });
+
+// SPA fallback для любых не-API маршрутов
+if (fs.existsSync(clientBuildPath)) {
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/health')) return next();
+    res.sendFile(path.join(clientBuildPath, 'index.html'));
+  });
+}
 
 // Socket.IO обработчики
 io.on('connection', (socket) => {
