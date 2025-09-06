@@ -113,6 +113,12 @@ function App() {
           />
         );
       }
+      case 'original-preview':{
+        const demoUser = user || { id: 'demo_'+Date.now(), username: 'Demo User', email: 'demo@example.com' };
+        return (
+          <OriginalGameBoard roomId={'demo-room'} socket={socket} user={demoUser} onExit={() => setCurrentPage('home')} />
+        );
+      }
       case 'home':
       default:
         return (
@@ -200,6 +206,15 @@ function App() {
                 sx={{ ml: 1 }}
               >
                 Original: {useOriginalBoard ? 'ON' : 'OFF'}
+              </Button>
+
+              <Button 
+                variant="contained"
+                color="secondary"
+                onClick={() => { setCurrentGame({ id: 'demo-room' }); setCurrentPage('original-preview'); }}
+                sx={{ ml: 1 }}
+              >
+                Открыть Original
               </Button>
               
               {currentGame && (
